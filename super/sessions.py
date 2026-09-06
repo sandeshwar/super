@@ -154,8 +154,45 @@ def edit_message(cfg: dict, sid: str, idx: int, new_content: str) -> dict:
     return s
 
 
+_TITLE_STOPWORDS = frozenset(
+    "a an the and or but with from that this into have will would could should "
+    "there their what when where which while about into over under again once "
+    "here how why for are was were been has had not you your our out can just "
+    "please help need want know think make take show tell give than then them they "
+    "its also very much many some any all each".split()
+)
+
+
+def _extractive_title(text: str, max_len: int = 48) -> str:
+    """Keyword-frequency extractive title: top informative words in first-seen
+    order, 3-6 words. No model needed; used when the LLM summarizer is down."""
+    import re as _re
+    words = [w for w in _re.findall(r"[A-Za-z][A-Za-z0-9'\-]*", text.lower())
+             if w not in _TITLE_STOPWORDS and len(w) > 2]
+    if not words:
+        return ""
+    freq: dict[str, int] = {}
+    for w in words:
+        freq[w] = freq.get(w, 0) + 1
+    ranked: list[str] = []
+    for w in words:  # first-seen order, deduped, frequent first on ties
+        if w not in ranked:
+            ranked.append(w)
+    ranked.sort(key=lambda w: freq[w], reverse=True)
+    # keep narrative order for readability: reorder top picks by first position
+    first_pos = {w: words.index(w) for w in ranked[:8]}
+    picks = sorted(ranked[:6], key=lambda w: first_pos[w])[:6]
+    while len(picks) > 3 and sum(len(p) + 1 for p in picks) - 1 > max_len:
+        # drop lowest-frequency tail word until it fits
+        tail = min(picks, key=lambda w: (freq[w], -first_pos[w]))
+        picks.remove(tail)
+    title = " ".join(picks).strip().capitalize()[:max_len]
+    return title if len(title) >= 3 else ""
+
+
 def summarize_title(cfg: dict, sid: str, max_len: int = 48) -> str:
-    """Generate a 3-6 word title via LLM summary of history, fallback to first user message."""
+    """Generate a 3-6 word title: LLM summary first, extractive keywords next,
+    first user message as the last resort."""
     s = get(cfg, sid)
     if not s:
         raise KeyError(f"no session {sid}")
@@ -174,6 +211,13 @@ def summarize_title(cfg: dict, sid: str, max_len: int = 48) -> str:
         title = title.rstrip(".")
         if len(title) >= 3 and len(title.split()) <= 8:
             return title
+    except Exception:
+        pass
+    # extractive fallback: keyword title from the conversation
+    try:
+        extractive = _extractive_title(convo, max_len)
+        if extractive:
+            return extractive
     except Exception:
         pass
     # fallback: first user message

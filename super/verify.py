@@ -28,18 +28,225 @@ MUTATION_SENTINELS = {
 }
 
 
+def _strip_strings_comments(source: str) -> str:
+    """Remove string literals and line comments so delimiter checks ignore them."""
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        ch = source[i]
+        if ch in ("'", '"', "`"):
+            quote = ch
+            i += 1
+            triple = source[i:i+2] == quote * 2
+            if triple:
+                i += 2
+            while i < n:
+                if source[i] == "\\":
+                    i += 2
+                    continue
+                if triple and source[i:i+3] == quote * 3:
+                    i += 3
+                    break
+                if not triple and source[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            out.append(" ")
+        elif ch == "/" and i + 1 < n and source[i+1] == "/":
+            while i < n and source[i] != "\n":
+                i += 1
+        elif ch == "/" and i + 1 < n and source[i+1] == "*":
+            i += 2
+            while i + 1 < n and source[i:i+2] != "*/":
+                i += 1
+            i += 2
+            out.append(" ")
+        elif ch == "#":
+            while i < n and source[i] != "\n":
+                i += 1
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _delimiters_balanced(source: str) -> tuple[bool, str]:
+    """Stack-based (), {}, [] check on string/comment-stripped source."""
+    stripped = _strip_strings_comments(source)
+    pairs = {")": "(", "}": "{", "]": "["}
+    stack: list[tuple[str, int]] = []
+    lineno = 1
+    for ch in stripped:
+        if ch == "\n":
+            lineno += 1
+        elif ch in "({[":
+            stack.append((ch, lineno))
+        elif ch in ")}]":
+            if not stack or stack[-1][0] != pairs[ch]:
+                return False, f"unbalanced delimiter {ch!r} at line {lineno}"
+            stack.pop()
+    if stack:
+        opener, at = stack[-1]
+        return False, f"unclosed delimiter {opener!r} opened at line {at}"
+    return True, "delimiters balanced"
+
+
+def _toolchain_check(source: str, language: str) -> tuple[bool | None, str]:
+    """Real syntax check via an installed toolchain. None = no toolchain (skip-open).
+
+    Bounded (10s), temp-file based, never raises.
+    """
+    import os as _os
+    import shutil as _sh
+    import tempfile as _tf
+    specs: dict[str, tuple[str, list[str], str]] = {
+        "js": ("node", [".js"], "node --check"),
+        "javascript": ("node", [".js"], "node --check"),
+        "jsx": ("node", [".js"], "node --check"),
+        "ts": ("tsc", [".ts"], "tsc --noEmit"),
+        "typescript": ("tsc", [".ts"], "tsc --noEmit"),
+        "tsx": ("tsc", [".tsx"], "tsc --noEmit"),
+        "ruby": ("ruby", [".rb"], "ruby -c"),
+        "sh": ("sh", [".sh"], "sh -n"),
+        "bash": ("bash", [".sh"], "bash -n"),
+        "go": ("gofmt", [".go"], "gofmt -e"),
+        "rust": ("rustc", [".rs"], "rustc --emit=metadata (parse)"),
+        "json": ("", [".json"], "stdlib json"),
+        "yaml": ("", [".yml"], "stdlib yaml?"),
+        "toml": ("", [".toml"], "stdlib tomllib"),
+        "xml": ("", [".xml"], "stdlib xml"),
+        "html": ("", [".html"], "stdlib html.parser"),
+    }
+    lang = (language or "").lower()
+    if lang in ("json",):
+        import json as _json
+        try:
+            _json.loads(source)
+            return True, "valid JSON"
+        except Exception as e:
+            return False, f"invalid JSON: {e}"
+    if lang in ("yaml", "yml"):
+        try:
+            import yaml as _yaml  # type: ignore
+            _yaml.safe_load(source)
+            return True, "valid YAML"
+        except ImportError:
+            return None, "no yaml toolchain — heuristic only"
+        except Exception as e:
+            return False, f"invalid YAML: {e}"
+    if lang in ("toml",):
+        try:
+            import tomllib as _toml
+            _toml.loads(source)
+            return True, "valid TOML"
+        except ImportError:
+            return None, "no tomllib — heuristic only"
+        except Exception as e:
+            return False, f"invalid TOML: {e}"
+    if lang in ("xml",):
+        import xml.etree.ElementTree as _et
+        try:
+            _et.fromstring(source)
+            return True, "valid XML"
+        except Exception as e:
+            return False, f"invalid XML: {e}"
+    if lang in ("html",):
+        from html.parser import HTMLParser as _HP
+        errors: list[str] = []
+        void = {"br", "hr", "img", "input", "meta", "link", "source", "wbr",
+                "area", "base", "col", "embed", "track", "param"}
+        stack: list[str] = []
+
+        class _P(_HP):
+            def handle_starttag(self, tag, attrs):
+                if tag not in void:
+                    stack.append(tag)
+            def handle_endtag(self, tag):
+                if stack and stack[-1] == tag:
+                    stack.pop()
+                elif tag in stack:
+                    errors.append(f"mis-nested </{tag}>")
+                # stray closers ignored (browsers tolerate)
+        try:
+            _P().feed(source)
+            if errors:
+                return False, "; ".join(errors)
+            if stack and len(source) > 200:
+                return False, f"unclosed tags: {', '.join(stack[-3:])}"
+            return True, "tags balanced"
+        except Exception as e:
+            return False, f"HTML parse error: {e}"
+    if lang not in specs or not specs[lang][0]:
+        return None, "unknown language — delimiter heuristic only"
+    binary, suffixes, label = specs[lang]
+    if not _sh.which(binary):
+        return None, f"no {binary} toolchain — heuristic only"
+    try:
+        with _tf.NamedTemporaryFile("w", suffix=suffixes[0], delete=False,
+                                    encoding="utf-8") as f:
+            f.write(source)
+            path = f.name
+        try:
+            if binary == "node":
+                r = subprocess.run(["node", "--check", path], capture_output=True,
+                                   text=True, timeout=10)
+            elif binary == "tsc":
+                r = subprocess.run(["tsc", "--noEmit", "--skipLibCheck", path],
+                                   capture_output=True, text=True, timeout=30)
+            elif binary == "ruby":
+                r = subprocess.run(["ruby", "-c", path], capture_output=True,
+                                   text=True, timeout=10)
+            elif binary in ("sh", "bash"):
+                r = subprocess.run([binary, "-n", path], capture_output=True,
+                                   text=True, timeout=10)
+            elif binary == "gofmt":
+                r = subprocess.run(["gofmt", "-e", path], capture_output=True,
+                                   text=True, timeout=10)
+            elif binary == "rustc":
+                r = subprocess.run(["rustc", "--edition=2021", "--emit=metadata",
+                                    "--out-dir", _tf.gettempdir(), path],
+                                   capture_output=True, text=True, timeout=30)
+            else:
+                return None, "unknown toolchain"
+            tail = (r.stderr or r.stdout or "")[-400:].strip()
+            return (r.returncode == 0, f"{label}: {'ok' if r.returncode == 0 else tail or 'syntax error'}")
+        finally:
+            try:
+                _os.unlink(path)
+            except OSError:
+                pass
+    except subprocess.TimeoutExpired:
+        return None, f"{label} timed out — heuristic only"
+    except Exception as e:
+        return None, f"{label} unavailable ({e}) — heuristic only"
+
+
 def check_syntax(source: str, language: str = "py") -> tuple[bool, str]:
-    """Per-edit rung: the file must at least parse."""
+    """Per-edit rung: the file must at least parse.
+
+    Python uses ast. Structured formats (JSON/TOML/XML/HTML) use stdlib
+    parsers. Other languages prefer an installed toolchain (node --check,
+    tsc, ruby -c, sh -n, gofmt) and otherwise fall back to a
+    string-aware delimiter-balance check — which *can* reject on definite
+    imbalance but reports skip-open when there is nothing conclusive.
+    """
     if language in ("py", "python"):
         try:
             ast.parse(source)
             return True, "parses"
         except SyntaxError as e:
             return False, f"syntax error: {e}"
-    # Unknown languages: brace/paren balance heuristic, never a hard block.
-    if source.count("(") != source.count(")") or source.count("{") != source.count("}"):
-        return False, "unbalanced delimiters"
-    return True, "heuristic pass"
+    if not source.strip():
+        return False, "empty edit"
+    ok, msg = _toolchain_check(source, language)
+    if ok is not None:
+        return ok, msg
+    # No toolchain: string-aware delimiter check (no false positives from
+    # brackets inside strings/comments).
+    balanced, detail = _delimiters_balanced(source)
+    if not balanced:
+        return False, detail
+    return True, f"{detail} ({msg})"
 
 
 def impact_subset(changed_files: list[str], test_index: dict[str, list[str]] | None = None) -> list[str]:

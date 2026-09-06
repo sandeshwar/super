@@ -52,11 +52,14 @@ APPROVED_LICENSES = {"MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
                      "Python-2.0", "PSF", "Unlicense", "CC0-1.0", "MPL-2.0", "LGPL-3.0"}
 KNOWN_PACKAGES = {"react", "react-dom", "vite", "typescript", "pytest", "requests",
                   "numpy", "pandas", "flask", "django", "fastapi", "express"}
-# Known vulnerable pins for offline CVE heuristic (real impl would query OSV/NVD)
+# Offline CVE fallback pins (live OSV is authoritative when online).
+# Thresholds last synced from OSV affected ranges: requests <2.33.0 still
+# matches GHSA-9hjg-9r4m-mvj7 (fix 2.32.4), GHSA-9wx4-h78v-vm56 (fix 2.32.0),
+# GHSA-gc5v-m9x4-r6x2 (fix 2.33.0).
 VULN_DB: dict[str, list[str]] = {
     "lodash": ["<4.17.21"],
     "minimist": ["<1.2.8"],
-    "requests": ["<2.28.0"],
+    "requests": ["<2.33.0"],
     "pillow": ["<9.5.0"],
 }
 
@@ -160,10 +163,97 @@ def _typosquat(name: str) -> str | None:
     return None
 
 
-def _cve_check(name: str, version: str) -> str | None:
-    """Offline CVE heuristic vs VULN_DB. Returns advisory or None. Real impl queries OSV/NVD."""
+def _osv_cache_path(cfg: dict | None, name: str, version: str, ecosystem: str) -> str | None:
+    if not cfg or not cfg.get("state_dir"):
+        return None
+    safe = "".join(c if c.isalnum() else "_" for c in f"{ecosystem}_{name}_{version}")
+    return os.path.join(cfg["state_dir"], "osv-cache", f"{safe}.json")
+
+
+def _osv_query(name: str, version: str, ecosystem: str,
+               cfg: dict | None = None, timeout: int = 6) -> list[dict]:
+    """Query OSV (covers NVD/GHSA) for package@version. Cached 24h; [] on offline/error.
+
+    Stdlib urllib only. Cache lives in <state_dir>/osv-cache/ so offline runs
+    reuse the last verdict instead of failing open silently.
+    """
+    import json as _json
+    import urllib.request as _url
+    cache_path = _osv_cache_path(cfg, name, version, ecosystem)
+    if cache_path and os.path.isfile(cache_path):
+        try:
+            if time.time() - os.path.getmtime(cache_path) < 86400:
+                with open(cache_path, encoding="utf-8") as f:
+                    return _json.load(f).get("vulns", [])
+        except Exception:
+            pass
+    try:
+        payload = _json.dumps({"package": {"name": name, "ecosystem": ecosystem},
+                               "version": version}).encode()
+        req = _url.Request("https://api.osv.dev/v1/query", data=payload,
+                           headers={"Content-Type": "application/json",
+                                    "User-Agent": "super-harness/1.0"},
+                           method="POST")
+        with _url.urlopen(req, timeout=timeout) as r:
+            body = _json.loads(r.read(500000).decode("utf-8", errors="replace"))
+        vulns = body.get("vulns", []) if isinstance(body, dict) else []
+        if cache_path:
+            try:
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                with open(cache_path, "w", encoding="utf-8") as f:
+                    _json.dump({"vulns": vulns,
+                                "fetched": time.strftime("%Y-%m-%dT%H:%M:%S")}, f)
+            except Exception:
+                pass
+        return vulns
+    except Exception:
+        # offline: serve stale cache if any
+        if cache_path and os.path.isfile(cache_path):
+            try:
+                with open(cache_path, encoding="utf-8") as f:
+                    return _json.load(f).get("vulns", [])
+            except Exception:
+                pass
+        return []
+
+
+def _infer_ecosystems(name: str) -> list[str]:
+    """Ecosystems to probe on OSV for a bare dependency name."""
+    n = name.lower()
+    if n.startswith("@") or "-" in n or n in ("react", "react-dom", "vite", "express",
+                                              "lodash", "minimist", "typescript"):
+        return ["npm"]
+    if "_" in n or n in ("requests", "pillow", "numpy", "pandas", "flask",
+                         "django", "fastapi", "pytest"):
+        return ["PyPI"]
+    return ["npm", "PyPI"]  # unknown — probe both, npm first
+
+
+def _cve_check(name: str, version: str, cfg: dict | None = None,
+               ecosystem: str | None = None) -> str | None:
+    """Live CVE screen via OSV (NVD/GHSA-backed), VULN_DB as offline fallback.
+
+    Returns an advisory string or None. Never raises and never blocks on
+    network failure — offline verdicts fall back to the pinned VULN_DB.
+    """
     if not version:
         return None
+    ecosystems = [ecosystem] if ecosystem else _infer_ecosystems(name)
+    for eco in ecosystems:
+        vulns = _osv_query(name, version, eco, cfg)
+        if vulns:
+            top = vulns[0]
+            vid = top.get("id", "OSV")
+            sev = ""
+            try:
+                sev = (top.get("severity") or [{}])[0].get("score", "")
+                sev = f" (severity {sev})" if sev else ""
+            except Exception:
+                pass
+            summary = (top.get("summary") or top.get("details") or "")[:160]
+            return (f"{name}@{version} has {len(vulns)} known vuln(s) via OSV [{eco}] "
+                    f"({vid}{sev}) {summary} — update required".strip())
+    # offline fallback: pinned VULN_DB heuristic
     import re as _re
     # normalize version like "1.2.3" -> tuple
     def _parse(v: str) -> tuple[int, ...]:
@@ -183,14 +273,14 @@ def _cve_check(name: str, version: str) -> str | None:
     return None
 
 def gate_dependency(cfg: dict, name: str, version: str = "",
-                    license: str = "") -> tuple[bool, str]:
+                    license: str = "", ecosystem: str | None = None) -> tuple[bool, str]:
     """Pin + CVE + typosquat + license screen for every newly introduced dependency."""
     if not cfg.get("security", {}).get("dependency_gate", True):
         return True, "dependency gate disabled"
     if not version:
         ledger.log_gate(cfg, "dependency", "F5", "reject", detail=f"{name} unpinned")
         return False, f"dependency {name} must be version-pinned"
-    cve = _cve_check(name, version)
+    cve = _cve_check(name, version, cfg, ecosystem)
     if cve:
         ledger.log_gate(cfg, "dependency", "F5", "reject", detail=cve)
         ledger.add_issue(cfg, "critical", "security", cve)

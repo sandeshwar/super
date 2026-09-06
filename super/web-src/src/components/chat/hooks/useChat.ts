@@ -125,6 +125,16 @@ export function useChat() {
         setInput('');
         return;
       }
+      if (cmd === '/spec-pin') {
+        const [id, ...acc] = rest;
+        try {
+          const r = await fetch('/api/spec/pin', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('super_token') || ''}` }, body: JSON.stringify({ id, acceptance: acc }) });
+          const body = await r.json();
+          setMessages((m) => [...m, { role: 'assistant', content: r.ok && body.ok ? `Spec pinned for ${id}: ${acc.length} check(s)` : `Spec pin failed: ${body.error || r.status}`, ts: new Date().toISOString() }]);
+        } catch (e) { setMessages((m) => [...m, { role: 'assistant', content: `Spec pin failed: ${(e as Error).message}`, ts: new Date().toISOString() }]); }
+        setInput('');
+        return;
+      }
     }
     setError(null);
     setBusy(true);

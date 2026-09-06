@@ -135,6 +135,21 @@ class TestSpec(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_pin_persists_and_reads_back(self):
+        from super import spec as S
+
+        cfg, root = make_cfg()
+        try:
+            self.assertIsNone(S.get_spec(cfg, "7"))
+            s = S.pin_spec(cfg, {"id": "7"}, ["tests/a.py::test_x fails"])
+            self.assertTrue(s["pinned"])
+            back = S.get_spec(cfg, "7")
+            self.assertEqual(back["acceptance"], ["tests/a.py::test_x fails"])
+            self.assertTrue(back["pinned"])
+            self.assertEqual(len(S.list_specs(cfg)), 1)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
 
 class TestSecurity(unittest.TestCase):
     def test_secrets(self):
@@ -156,7 +171,12 @@ class TestSecurity(unittest.TestCase):
         try:
             ok, _ = sec.gate_dependency(cfg, "requests", "")
             self.assertFalse(ok)
-            ok, _ = sec.gate_dependency(cfg, "requests", "2.31.0", "Apache-2.0")
+            # requests 2.20.0 has known CVEs (offline VULN_DB + live OSV agree)
+            ok, msg = sec.gate_dependency(cfg, "requests", "2.20.0", "Apache-2.0")
+            self.assertFalse(ok)
+            self.assertIn("update required", msg)
+            # clean pin passes (no VULN_DB entry, no OSV vulns for fastapi 0.115.6)
+            ok, _ = sec.gate_dependency(cfg, "fastapi", "0.115.6", "MIT")
             self.assertTrue(ok)
         finally:
             shutil.rmtree(root, ignore_errors=True)

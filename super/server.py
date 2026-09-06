@@ -179,10 +179,21 @@ class Handler(BaseHTTPRequestHandler):
             tid = (q.get("id", [""])[0] or "").strip()
             if not tid:
                 return self._send_json({"error": "missing ?id=", "code": 400}, 400)
-            # spec is pinned per task via ledger detail; return task + placeholder spec
+            # Pinned contract from specs.json (via `spec pin`); falls back to an
+            # unpinned draft derived from the task's done-looks-like text.
             try:
                 t = tasks.get(CFG, tid)
-                return self._send_json({"task": t, "spec": {"task_id": tid, "acceptance": [t.get("done","")], "pinned": bool(t.get("done"))}})
+                from . import spec as _spec
+                pinned = _spec.get_spec(CFG, tid)
+                if pinned:
+                    return self._send_json({"task": t, "spec": pinned})
+                draft = (t.get("done") or "").strip()
+                return self._send_json({"task": t, "spec": {
+                    "task_id": tid,
+                    "acceptance": [draft] if draft else [],
+                    "pinned": False,
+                    "hint": "no pinned spec — run `spec pin <id> <acceptance...>` or POST /api/spec/pin",
+                }})
             except KeyError:
                 return self._send_json({"error": "no such task", "code": 404}, 404)
         if u.path == "/api/sessions":
@@ -270,6 +281,23 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": "no such task", "code": 404}, 404)
                 ledger.log_gate(CFG, "rollback", "F2", "pass", detail=f"rollback to {tid} reopened {reopened}")
                 return self._send_json({"ok": True, "reopened": reopened})
+            if path_no_q in ("/api/spec/pin", "/spec/pin"):
+                tid = str(body.get("id", "")).strip()
+                acceptance = body.get("acceptance", [])
+                if isinstance(acceptance, str):
+                    acceptance = [acceptance]
+                if not tid:
+                    return self._send_json({"error": "id required", "code": 400}, 400)
+                try:
+                    task = tasks.get(CFG, tid)
+                except KeyError:
+                    return self._send_json({"error": "no such task", "code": 404}, 404)
+                try:
+                    from . import spec as _specmod
+                    s = _specmod.pin_spec(CFG, task, [str(a) for a in acceptance])
+                    return self._send_json({"ok": True, "spec": s})
+                except Exception as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
             if self.path.split("?")[0] == "/api/sessions":
                 sid = sessions.create(CFG, str(body.get("title", "New chat"))[:120])
                 return self._send_json({"id": sid})

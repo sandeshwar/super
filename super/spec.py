@@ -18,12 +18,48 @@ from .errors import SpecError
 GATE_ID = "spec"
 DRIFT_GATE = "drift"
 
+_FILE = "specs.json"
+_SCHEMA = 1
+
+
+def _path(cfg: dict) -> str:
+    return f"{cfg['state_dir']}/{_FILE}"
+
+
+def _blank() -> dict:
+    return {"schema": _SCHEMA, "specs": {}}
+
+
+def _load(cfg: dict) -> dict:
+    from . import store
+    data = store.load_json(_path(cfg), _blank())
+    if not isinstance(data, dict) or not isinstance(data.get("specs"), dict):
+        return _blank()
+    return data
+
+
+def _save(cfg: dict, data: dict) -> None:
+    from . import store
+    store.save_json(_path(cfg), data)
+
+
+def get_spec(cfg: dict, task_id: str) -> dict | None:
+    """Return the pinned spec for `task_id`, or None when never pinned."""
+    return _load(cfg)["specs"].get(str(task_id))
+
+
+def list_specs(cfg: dict) -> list[dict]:
+    """All pinned specs, sorted by task id."""
+    specs = _load(cfg)["specs"]
+    return [specs[k] for k in sorted(specs, key=lambda x: int(x) if x.isdigit() else x)]
+
 
 def pin_spec(cfg: dict, task: dict, acceptance: list[str]) -> dict:
     """Attach executable acceptance criteria to a task.
 
     Raises SpecError when intent cannot compile to a testable check — the
     task is rejected back for clarification with concrete options.
+    Persists to <state_dir>/specs.json so /api/spec serves the contract.
     """
     clean = [a.strip() for a in (acceptance or []) if a and a.strip()]
     if not clean:
@@ -32,9 +68,16 @@ def pin_spec(cfg: dict, task: dict, acceptance: list[str]) -> dict:
             "(1) name the failing test file, (2) describe observable behavior, "
             "(3) split the task until each leaf is checkable."
         )
-    spec = {"task_id": task.get("id"), "acceptance": clean, "pinned": True}
+    spec = {"task_id": task.get("id"), "acceptance": clean, "pinned": True,
+            "pinned_at": __import__("time").strftime("%Y-%m-%dT%H:%M:%S")}
     ledger.log_gate(cfg, GATE_ID, "F2b", "pass",
                     detail=f"spec pinned for {task.get('id')}: {len(clean)} checks")
+    try:
+        data = _load(cfg)
+        data["specs"][str(task.get("id"))] = spec
+        _save(cfg, data)
+    except Exception:
+        pass
     return spec
 
 

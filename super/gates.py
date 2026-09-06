@@ -82,37 +82,202 @@ def ensure_docs_cache(cfg: dict, package: str, version: str, symbols: list[str])
     return path
 
 
-def scrape_docs_versioned(cfg: dict, package: str, version: str) -> bool:
-    """Version-pinned docs scraper stub: checks lockfile version, creates cache if missing.
+def _dts_exports(root: str, package: str) -> list[str]:
+    """Parse .d.ts / .js sources under node_modules/<package> for exported symbols."""
+    import re as _re
+    base = os.path.join(root, "super", "web-src", "node_modules", package)
+    if not os.path.isdir(base):
+        base = os.path.join(root, "node_modules", package)
+    if not os.path.isdir(base):
+        return []
+    pats = [
+        r"export\s+(?:default\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)",
+        r"export\s*\{\s*([^}]{1,2000})\s*\}",
+        r"module\.exports\s*=\s*\{([^}]{1,2000})\}",
+        r"exports\.([A-Za-z_$][\w$]*)\s*=",
+        r"(?:function|class)\s+([A-Za-z_$][\w$]*)\s*\(",
+    ]
+    found: list[str] = []
+    checked = 0
+    for dirpath, _, files in os.walk(base):
+        if "node_modules" in dirpath[len(base):] and dirpath != base:
+            continue
+        for fn in files:
+            if not fn.endswith((".d.ts", ".js", ".ts")) or fn.endswith((".min.js", ".map")):
+                continue
+            if checked >= 40:
+                break
+            checked += 1
+            try:
+                with open(os.path.join(dirpath, fn), encoding="utf-8", errors="replace") as f:
+                    text = f.read(60000)
+            except OSError:
+                continue
+            for pat in pats:
+                for m in _re.finditer(pat, text):
+                    grp = m.group(1)
+                    if "{" in pat or "," in grp:
+                        for part in _re.split(r"[,\s]+", grp):
+                            name = part.split(" as ")[-1].strip()
+                            if _re.fullmatch(r"[A-Za-z_$][\w$]*", name) and name not in found:
+                                found.append(name)
+                    elif grp not in found:
+                        found.append(grp)
+            if len(found) >= 300:
+                break
+        if checked >= 40 or len(found) >= 300:
+            break
+    # package.json main/types entry points are evidence too
+    try:
+        import json as _json
+        with open(os.path.join(base, "package.json"), encoding="utf-8") as f:
+            meta = _json.load(f)
+        for key in ("main", "types", "typings", "module"):
+            if isinstance(meta.get(key), str) and meta[key] not in found:
+                found.append(meta[key].split("/")[-1])
+    except Exception:
+        pass
+    return found[:300]
 
-    Real impl would fetch from registry/docs site; this stub uses local symbol scan
-    as cache population to keep stdlib-only and offline.
-    """
+
+def _site_package_symbols(root: str, package: str) -> list[str]:
+    """Parse installed Python package for top-level public symbols via AST."""
+    import sys as _sys
+    candidates = [os.path.join(root, ".venv", "lib"), os.path.join(root, "venv", "lib"),
+                  os.path.join(root, "site-packages")]
+    for sp in _sys.path:
+        if "site-packages" in sp or "dist-packages" in sp:
+            candidates.append(sp)
+    norm = package.replace("-", "_")
+    for base in candidates:
+        if not os.path.isdir(base):
+            continue
+        for entry in (package, norm):
+            pkgdir = os.path.join(base, entry)
+            init = os.path.join(pkgdir, "__init__.py")
+            if os.path.isfile(init):
+                try:
+                    with open(init, encoding="utf-8", errors="replace") as f:
+                        text = f.read(60000)
+                    from . import memory as _mem
+                    parsed = _mem.parse_with_treesitter(text, "python")
+                    syms = list(parsed.get("symbols", []))
+                    detail = parsed.get("detail", {}) or {}
+                    syms += detail.get("imports", [])
+                    if syms:
+                        return syms[:300]
+                except Exception:
+                    continue
+    return []
+
+
+def _fetch_json(url: str, timeout: int = 8) -> dict | None:
+    """Stdlib HTTPS GET → parsed JSON. None on any failure (offline-safe)."""
     import json as _json
+    import urllib.request as _url
+    try:
+        req = _url.Request(url, headers={"Accept": "application/json",
+                                         "User-Agent": "super-harness/1.0"})
+        with _url.urlopen(req, timeout=timeout) as r:
+            if r.status != 200:
+                return None
+            return _json.loads(r.read(300000).decode("utf-8", errors="replace"))
+    except Exception:
+        return None
+
+
+def _npm_symbols(package: str, version: str) -> tuple[list[str], str]:
+    """Fetch version metadata from the npm registry; exports keys are symbols."""
+    top = package.split("/")[0] if "/" in package and not package.startswith("@") else package
+    doc = _fetch_json(f"https://registry.npmjs.org/{package}/{version}")
+    if not doc:
+        doc = _fetch_json(f"https://registry.npmjs.org/{package}/latest")
+    if not doc:
+        return [], ""
+    syms: list[str] = []
+    for key in ("exports", "typesVersions"):
+        val = doc.get(key)
+        if isinstance(val, dict):
+            syms.extend(str(k).strip("./").split("/")[0] for k in val.keys())
+    for key in ("main", "types", "typings", "module", "description"):
+        if isinstance(doc.get(key), str):
+            syms.append(doc[key].split("/")[-1][:80])
+    dist_tags = ""
+    return sorted(set(s for s in syms if s and s != "."))[:200], dist_tags
+
+
+def _pypi_symbols(package: str, version: str) -> list[str]:
+    """Fetch release metadata from PyPI; entry points + summary keywords are symbols."""
+    doc = _fetch_json(f"https://pypi.org/pypi/{package}/{version}/json".replace("//json", "/json")
+                      if version != "pinned" else f"https://pypi.org/pypi/{package}/json")
+    if not doc:
+        return []
+    info = doc.get("info", {}) if isinstance(doc, dict) else {}
+    syms: list[str] = []
+    for key in ("summary", "description"):
+        text = info.get(key) or ""
+        import re as _re
+        syms.extend(_re.findall(r"[A-Za-z_]\w{2,40}", str(text))[:40])
+    urls = doc.get("urls", []) if isinstance(doc, dict) else []
+    if urls:
+        syms.append(f"release-files:{len(urls)}")
+    return sorted(set(syms))[:200]
+
+
+def scrape_docs_versioned(cfg: dict, package: str, version: str) -> bool:
+    """Pin versioned docs for package@version into .super/docs-cache/.
+
+    Resolution order (first non-empty wins, all stdlib/offline-safe):
+      1. existing cache file,
+      2. local node_modules .d.ts export parse (npm),
+      3. local site-packages AST parse (Python),
+      4. npm registry version metadata (exports map),
+      5. PyPI release metadata.
+    Always writes a cache entry (possibly with source=unresolved) so the
+    write path can proceed offline; returns True when any symbols resolved.
+    """
     root = cfg.get("_root", ".")
     path = _docs_cache_path(root, package, version)
     if os.path.isfile(path):
         return True
-    # Try to find package symbols via grep in node_modules or site-packages (best-effort)
-    candidates = [os.path.join(root, "super", "web-src", "node_modules", package)]
-    found = []
-    for cand in candidates:
-        if os.path.isdir(cand):
-            # naive: list files as symbols
-            for dirpath, _, files in os.walk(cand):
-                for fn in files[:20]:
-                    if fn.endswith((".d.ts", ".js")):
-                        found.append(fn)
-            break
-    # create cache even if empty — marks as pinned
-    ensure_docs_cache(cfg, package, version, found[:100])
-    # also log
+    symbols: list[str] = []
+    source = "unresolved"
+    local = _dts_exports(root, package)
+    if local:
+        symbols, source = local, "node_modules"
+    if not symbols:
+        site_syms = _site_package_symbols(root, package)
+        if site_syms:
+            symbols, source = site_syms, "site-packages"
+    if not symbols and version != "pinned":
+        npm_syms, _ = _npm_symbols(package, version)
+        if npm_syms:
+            symbols, source = npm_syms, "npm-registry"
+    if not symbols:
+        pypi_syms = _pypi_symbols(package, version)
+        if pypi_syms:
+            symbols, source = pypi_syms, "pypi"
+    ensure_docs_cache(cfg, package, version, symbols[:300])
     try:
-        from . import ledger
-        ledger.log_gate(cfg, "docs", "F1", "pass", detail=f"docs-cache pinned {package}@{version} ({len(found)} symbols)")
+        # annotate cache with provenance source
+        import json as _json
+        with open(path, encoding="utf-8") as f:
+            data = _json.load(f)
+        data["source"] = source
+        import time as _time
+        data["fetched_at"] = _time.strftime("%Y-%m-%dT%H:%M:%S")
+        with open(path, "w", encoding="utf-8") as f:
+            _json.dump(data, f, indent=2)
     except Exception:
         pass
-    return True
+    try:
+        from . import ledger
+        ledger.log_gate(cfg, "docs", "F1", "pass",
+                        detail=f"docs-cache pinned {package}@{version} "
+                               f"({len(symbols)} symbols via {source})")
+    except Exception:
+        pass
+    return bool(symbols)
 
 
 def docs_have(symbol: str, root: str) -> bool:

@@ -150,6 +150,11 @@ class ApiService implements IApiService {
   checklist() { return http.request<{ checklist: string[] }>('/api/checklist', 'GET'); }
   waivers() { return http.request<{ waivers: unknown[] }>('/api/waivers', 'GET'); }
   spec(id: string) { requireId(id); return http.request<{ task: import('./types').TaskNode; spec: { acceptance: string[]; pinned: boolean } }>(`/api/spec?id=${encodeURIComponent(id)}`, 'GET'); }
+  pinSpec(id: string, acceptance: string[]) {
+    requireId(id);
+    if (!acceptance.length) throw new Error('acceptance criteria required');
+    return http.request<{ ok: boolean; spec: { acceptance: string[]; pinned: boolean } }>('/api/spec/pin', 'POST', { id, acceptance });
+  }
   models() { return http.request<{ models: string[]; current: string }>('/api/models', 'GET'); }
   setModel(model: string) { requireNonEmpty(model, 'model'); return http.request<{ ok: boolean; model: string }>('/api/model', 'POST', { model }); }
   workspace() { return http.request<{ workspace: string; state_dir: string; config_path: string | null }>('/api/workspace', 'GET'); }
