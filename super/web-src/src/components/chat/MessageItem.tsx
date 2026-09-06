@@ -26,12 +26,12 @@ type Props = {
 export function MessageItem({ message, index, busy, isLast, editingIdx, editDraft, setEditDraft, setEditingIdx, onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop }: Props) {
   const isUser = message.role === 'user';
   return (
-    <div className="msg-wrap fade-in" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start', alignSelf: isUser ? 'flex-end' : 'flex-start', maxWidth: '84%', flexDirection: isUser ? 'row-reverse' : 'row', overflow: 'visible', position: 'relative' }}>
+    <div className="msg-wrap fade-in" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start', alignSelf: isUser ? 'flex-end' : 'stretch', width: isUser ? 'auto' : '100%', maxWidth: isUser ? '80%' : '100%', flexDirection: isUser ? 'row-reverse' : 'row', overflow: 'visible', position: 'relative' }}>
       <Avatar role={message.role} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', alignItems: isUser ? 'flex-end' : 'flex-start', flex: 1, minWidth: 0, overflow: 'visible' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', alignItems: isUser ? 'flex-end' : 'stretch', flex: 1, minWidth: 0, overflow: 'visible' }}>
         {editingIdx === index ? (
           <div style={{ width: '100%', display: 'flex', gap: 6, flexDirection: 'column' }}>
-            <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} style={{ width: '100%', minHeight: 60, padding: 'var(--space-2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--accent-border)', background: 'var(--bg-1)', color: 'var(--fg-0)', fontSize: 'var(--text-base)' }} />
+            <textarea value={editDraft} onChange={(e) => setEditDraft(e.target.value)} style={{ width: '100%', minHeight: 60, padding: 'var(--space-2)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--accent-border)', background: 'var(--bg-1)', color: 'var(--fg-0)', fontSize: 'var(--text-chat)', lineHeight: 'var(--leading-chat)' }} />
             <div style={{ display: 'flex', gap: 6 }}>
               <Button size="sm" variant="primary" onClick={() => void onEditAndResend(index)}>save & resend</Button>
               <Button size="sm" variant="ghost" onClick={() => setEditingIdx(null)}>cancel</Button>
@@ -40,8 +40,8 @@ export function MessageItem({ message, index, busy, isLast, editingIdx, editDraf
         ) : (
           <MessageBubble message={message} busy={busy} isLast={isLast} />
         )}
-        <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
-          <span className="mono" style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-4)', whiteSpace: 'nowrap' }}>{isUser ? 'you' : 'super'} · {formatTime(message.ts) || (busy && isLast ? 'now' : '')}</span>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+          <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-4)', whiteSpace: 'nowrap', letterSpacing: 'var(--tracking-wide)', fontWeight: 500 }}>{isUser ? 'YOU' : 'SUPER'} · {formatTime(message.ts) || (busy && isLast ? 'now' : '')}</span>
           {message.role === 'assistant' && <GateChip gate={message.gate} />}
         </div>
         <MessageActions

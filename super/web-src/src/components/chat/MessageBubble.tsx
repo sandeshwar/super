@@ -4,25 +4,30 @@ import { Markdown } from '../Markdown';
 
 export function MessageBubble({ message, busy, isLast }: { message: ChatMessage; busy?: boolean; isLast?: boolean }) {
   const isUser = message.role === 'user';
-  return (
-    <div
-      style={{
-        padding: 'var(--space-2) var(--space-3)',
-        borderRadius: isUser ? 'var(--radius) var(--radius) var(--radius-sm) var(--radius)' : 'var(--radius) var(--radius) var(--radius) var(--radius-sm)',
-        background: isUser ? 'var(--accent)' : 'var(--bg-3)',
-        color: isUser ? 'var(--accent-fg)' : 'var(--fg-0)',
-        border: `1px solid ${isUser ? 'var(--accent)' : 'var(--border)'}`,
-        fontSize: 'var(--text-base)', lineHeight: 'var(--leading-relaxed)', wordBreak: 'break-word',
-      }}
-    >
-      {isUser ? (
+  if (isUser) {
+    return (
+      <div
+        style={{
+          padding: 'var(--space-2) var(--space-4)',
+          borderRadius: 'var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg)',
+          background: 'var(--accent)',
+          color: 'var(--accent-fg)',
+          border: '1px solid var(--accent)',
+          fontSize: 'var(--text-chat)', lineHeight: 'var(--leading-chat)', wordBreak: 'break-word',
+          boxShadow: 'var(--shadow-xs)',
+        }}
+      >
         <span style={{ whiteSpace: 'pre-wrap' }}>{message.content || (busy && isLast ? 'thinking…' : '')}</span>
-      ) : (
-        <Markdown content={message.content || (busy && isLast ? 'thinking…' : '')} gate={message.gate} />
-      )}
-      {/* Tool trace per assistant — collapsed by default to save vertical space */}
-      {message.role === 'assistant' && message.content && (
-        <div style={{ marginTop: 'var(--space-1)', background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
+      </div>
+    );
+  }
+  // Assistant renders as flat article text — no bubble chrome, full reading width.
+  return (
+    <div style={{ padding: 'var(--space-1) 0', color: 'var(--fg-0)', minWidth: 0 }}>
+      <Markdown content={message.content || (busy && isLast ? 'thinking…' : '')} />
+      {/* Tool trace — collapsed by default to save vertical space */}
+      {message.content && (
+        <div style={{ marginTop: 'var(--space-2)', background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
           <Collapsible
             title="Tool trace"
             className="collapsible-bare"
