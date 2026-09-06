@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUPER — gated harness</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="mark">S</span>
+    <span class="wordmark">SUPER <small>GATED HARNESS</small></span>
+  </div>
+  <span id="model" class="model-pill"></span>
+  <nav>
+    <button data-view="chat" class="active">Chat</button>
+    <button data-view="tree">Job Tree</button>
+    <button data-view="approve">Approve</button>
+    <button data-view="report">Report Card</button>
+  </nav>
+</header>
+<main id="view"><p class="muted" style="padding:24px">Loading…</p></main>
+<footer id="bar"><span class="mono">…</span></footer>
+<script src="/app.js"></script>
+</body>
+</html>

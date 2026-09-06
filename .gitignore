@@ -1,0 +1,22 @@
+# Local runtime state + secrets (never commit)
+.super/
+super.config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Frontend build output + deps
+super/web/dist/
+super/web-src/node_modules/
+super/web-src/dist/
+
+# OS / editor
+.DS_Store
+*.local

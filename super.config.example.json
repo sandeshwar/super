@@ -1,0 +1,66 @@
+{
+  "llm": {
+    "endpoint": "http://localhost:11434",
+    "model": "ddalcu/Qwen3.8-Flash-Next-MLX-Serve-4bit:latest",
+    "timeout_s": 120,
+    "retries": 2,
+    "health_path": "/api/tags"
+  },
+  "envelope": {
+    "max_microtask_lines": 50,
+    "best_of_n": 5,
+    "max_steps_per_task": 20,
+    "early_abort_stall": 3
+  },
+  "gates": {
+    "grounding": true,
+    "docs_before_write": true,
+    "standards": true,
+    "duplication": true,
+    "verification": true,
+    "mutation": true,
+    "spec": true,
+    "drift": true,
+    "quality": true,
+    "security": true,
+    "taint": true,
+    "ambition": true
+  },
+  "verification": {
+    "mutation_operators": [
+      "operator",
+      "boundary",
+      "statement"
+    ],
+    "flaky_runs": 3,
+    "fuzz_seconds": 5
+  },
+  "quality": {
+    "max_loc_per_edit": 300,
+    "max_complexity": 10,
+    "max_nesting": 4
+  },
+  "security": {
+    "block_secrets": true,
+    "sast": true,
+    "dependency_gate": true,
+    "sink_audit": true
+  },
+  "trust": {
+    "auto_pass_max_blast": 2,
+    "fatigue_approve_threshold": 0.95,
+    "fatigue_window": 40,
+    "attention_budget_per_task": 10
+  },
+  "ambition": {
+    "default_loa": 4,
+    "critics": 3,
+    "require_scorecard": true
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 4311,
+    "token": "REPLACE_WITH_LONG_RANDOM_TOKEN"
+  },
+  "state_dir": "./.super"
+}
