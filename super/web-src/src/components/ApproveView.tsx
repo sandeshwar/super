@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { TaskNode } from '../types';
 import { Badge } from './ui/Badge';
@@ -38,14 +38,17 @@ export default function ApproveView({
   tasks,
   gates,
   onRefresh,
+  taskId = null,
+  onTaskIdChange,
 }: {
   tasks: TaskNode[];
   gates: Record<string, { pass: number; reject: number }>;
   onRefresh: () => void;
+  taskId?: string | null;
+  onTaskIdChange?: (id: string | null) => void;
 }) {
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { enqueue, pending } = useOfflineQueue();
@@ -53,7 +56,13 @@ export default function ApproveView({
   const waiting = tasks.filter((t) => t.status === 'waiting');
   const doing = tasks.filter((t) => t.status === 'doing');
   const candidates = [...waiting, ...doing];
-  const cand = (selectedId && candidates.find((c) => c.id === selectedId)) || candidates[0] || null;
+  const cand = (taskId && candidates.find((c) => c.id === taskId)) || candidates[0] || null;
+  const setSelectedId = (id: string) => onTaskIdChange?.(id);
+
+  // Keep URL in sync when falling back to first candidate
+  useEffect(() => {
+    if (cand && cand.id !== taskId) onTaskIdChange?.(cand.id);
+  }, [cand, taskId, onTaskIdChange]);
 
   const gatePass = Object.values(gates).reduce((s, g) => s + g.pass, 0);
   const gateReject = Object.values(gates).reduce((s, g) => s + g.reject, 0);

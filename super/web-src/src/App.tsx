@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ChatView from './components/ChatView';
 import TreeView from './components/TreeView';
 import ApproveView from './components/ApproveView';
@@ -9,17 +9,50 @@ import { Sidebar } from './components/shell/Sidebar';
 import { AppHeader } from './components/shell/AppHeader';
 import { AppFooter } from './components/shell/AppFooter';
 import { useAppData } from './components/shell/hooks/useAppData';
+import { RouterProvider, useRouter, type TreeFilter, type TreeSort, type View } from './lib/router';
 import './App.css';
 
-type View = 'chat' | 'tree' | 'approve' | 'report';
-
-export default function App() {
-  const [view, setView] = useState<View>('chat');
+function AppShell() {
+  const { route, view, navigate } = useRouter();
   const [mobileNav, setMobileNav] = useState(false);
   const {
     model, setModel, models, workspace, setWorkspace, reloadFlash, setReloadFlash,
     tasks, gates, criticals, error, setError, offlinePending, stats, refresh, fetchModels, fetchWorkspace,
   } = useAppData();
+
+  const setView = useCallback((v: View) => {
+    if (v === 'chat') navigate({ view: 'chat', sessionId: route.view === 'chat' ? route.sessionId : null });
+    else if (v === 'tree') navigate({
+      view: 'tree',
+      taskId: route.view === 'tree' ? route.taskId : null,
+      q: route.view === 'tree' ? route.q : '',
+      status: route.view === 'tree' ? route.status : 'all',
+      sort: route.view === 'tree' ? route.sort : 'id',
+    });
+    else if (v === 'approve') navigate({ view: 'approve', taskId: route.view === 'approve' ? route.taskId : null });
+    else navigate({ view: 'report' });
+  }, [navigate, route]);
+
+  const onSessionIdChange = useCallback((id: string | null) => {
+    navigate({ view: 'chat', sessionId: id }, { replace: !id });
+  }, [navigate]);
+
+  const onTreeRouteChange = useCallback((patch: {
+    taskId?: string | null; q?: string; status?: TreeFilter; sort?: TreeSort;
+  }) => {
+    if (route.view !== 'tree') return;
+    navigate({
+      view: 'tree',
+      taskId: patch.taskId !== undefined ? patch.taskId : route.taskId,
+      q: patch.q !== undefined ? patch.q : route.q,
+      status: patch.status !== undefined ? patch.status : route.status,
+      sort: patch.sort !== undefined ? patch.sort : route.sort,
+    }, { replace: true });
+  }, [navigate, route]);
+
+  const onApproveTaskIdChange = useCallback((id: string | null) => {
+    navigate({ view: 'approve', taskId: id }, { replace: true });
+  }, [navigate]);
 
   const paletteItems = useMemo(() => [
     { id: 'chat', label: 'Go to Chat', hint: '1 / ⌘K', action: () => setView('chat') },
@@ -28,9 +61,8 @@ export default function App() {
     { id: 'report', label: 'Go to Report', hint: '4', action: () => setView('report') },
     { id: 'newchat', label: 'New chat', hint: 'c', action: () => window.dispatchEvent(new CustomEvent('super-new-chat')) },
     { id: 'refresh', label: 'Refresh data', action: () => void refresh() },
-  ], [refresh]);
+  ], [refresh, setView]);
 
-  // Keyboard nav: numbers + j/k for tree
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') return;
@@ -43,9 +75,8 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view]);
+  }, [view, setView]);
 
-  // Mobile swipe
   useEffect(() => {
     let startX = 0;
     const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX; };
@@ -58,12 +89,13 @@ export default function App() {
     return () => { window.removeEventListener('touchstart', onTouchStart); window.removeEventListener('touchmove', onTouchMove); };
   }, []);
 
+  useEffect(() => { setMobileNav(false); }, [view, route]);
+
   return (
     <div className="app-shell">
       <CommandPalette items={paletteItems} />
       <Sidebar
         view={view}
-        onViewChange={setView}
         tasks={tasks}
         gates={gates}
         criticals={criticals}
@@ -98,10 +130,30 @@ export default function App() {
         <main className="app-main" style={{ viewTransitionName: 'content' } as React.CSSProperties}>
           <div className="content-max">
             <ErrorBoundary>
-              {view === 'chat' && <ChatView />}
-              {view === 'tree' && <TreeView tasks={tasks} gates={gates} />}
-              {view === 'approve' && <ApproveView tasks={tasks} gates={gates} onRefresh={() => void refresh()} />}
-              {view === 'report' && <ReportView tasks={tasks} gates={gates} criticals={criticals} />}
+              {route.view === 'chat' && (
+                <ChatView sessionId={route.sessionId} onSessionIdChange={onSessionIdChange} />
+              )}
+              {route.view === 'tree' && (
+                <TreeView
+                  tasks={tasks}
+                  gates={gates}
+                  taskId={route.taskId}
+                  q={route.q}
+                  status={route.status}
+                  sort={route.sort}
+                  onRouteChange={onTreeRouteChange}
+                />
+              )}
+              {route.view === 'approve' && (
+                <ApproveView
+                  tasks={tasks}
+                  gates={gates}
+                  onRefresh={() => void refresh()}
+                  taskId={route.taskId}
+                  onTaskIdChange={onApproveTaskIdChange}
+                />
+              )}
+              {route.view === 'report' && <ReportView tasks={tasks} gates={gates} criticals={criticals} />}
             </ErrorBoundary>
           </div>
         </main>
@@ -111,5 +163,13 @@ export default function App() {
 
       {mobileNav && <div className="drawer-scrim" onClick={() => setMobileNav(false)} aria-hidden />}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <RouterProvider>
+      <AppShell />
+    </RouterProvider>
   );
 }

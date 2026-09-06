@@ -4,9 +4,21 @@ import type { ChatMessage, GateInfo, SessionSummary, TaskNode } from '../../../t
 import { userMessage } from '../../../lib/errors';
 import { shortId } from '../../../utils/format';
 
-export function useChat() {
+type ChatRouteOpts = {
+  sessionId?: string | null;
+  onSessionIdChange?: (id: string | null) => void;
+};
+
+export function useChat(opts: ChatRouteOpts = {}) {
+  const onSessionIdChange = opts.onSessionIdChange;
+  const controlled = onSessionIdChange !== undefined;
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [internalId, setInternalId] = useState<string | null>(opts.sessionId ?? null);
+  const activeId = controlled ? (opts.sessionId ?? null) : internalId;
+  const setActiveId = useCallback((id: string | null) => {
+    if (controlled) onSessionIdChange?.(id);
+    else setInternalId(id);
+  }, [controlled, onSessionIdChange]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);

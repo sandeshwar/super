@@ -11,14 +11,20 @@ import { ChatDock } from './chat/ChatDock';
  * ChatView — orchestrator only. All UI slices live in ./chat/*,
  * state lives in useChat(). Keeps the view thin, testable, and SOLID.
  */
-export default function ChatView() {
+export default function ChatView({
+  sessionId,
+  onSessionIdChange,
+}: {
+  sessionId: string | null;
+  onSessionIdChange: (id: string | null) => void;
+}) {
   const {
     sessions, filtered, activeId, setActiveId, messages, input, busy, error, setError, filter, setFilter,
     isRenaming, leaf, leafRendered, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention,
-  } = useChat();
+  } = useChat({ sessionId, onSessionIdChange });
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 'var(--space-3)', height: 'calc(100vh - 108px)', minHeight: 440 }}>

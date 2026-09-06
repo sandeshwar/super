@@ -7,6 +7,7 @@ import { Collapsible } from './ui/Collapsible';
 import { Input, Select } from './ui/Input';
 import { DagGraph } from './Graph/DagGraph';
 import { userMessage } from '../lib/errors';
+import type { TreeFilter, TreeSort } from '../lib/router';
 
 // Single responsibility: status badge
 export function StatusBadge({ status }: { status: string }) {
@@ -16,7 +17,7 @@ export function StatusBadge({ status }: { status: string }) {
   return <Badge variant={v}><span className="badge-dot" aria-hidden />{status}</Badge>;
 }
 
-type Filter = 'all' | TaskNode['status'];
+type Filter = TreeFilter;
 
 // ── Subcomponents (SRP) ──
 function Toolbar({
@@ -50,12 +51,35 @@ function Toolbar({
   );
 }
 
-export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: Record<string, { pass: number; reject: number }> }) {
-  const [selected, setSelected] = useState<string | null>(null);
-  const [q, setQ] = useState('');
-  const [f, setF] = useState<Filter>('all');
-  const [sort, setSort] = useState<'id' | 'status'>('id');
+type TreeRoutePatch = {
+  taskId?: string | null;
+  q?: string;
+  status?: TreeFilter;
+  sort?: TreeSort;
+};
+
+export default function TreeView({
+  tasks,
+  gates,
+  taskId = null,
+  q = '',
+  status = 'all',
+  sort = 'id',
+  onRouteChange,
+}: {
+  tasks: TaskNode[];
+  gates?: Record<string, { pass: number; reject: number }>;
+  taskId?: string | null;
+  q?: string;
+  status?: TreeFilter;
+  sort?: TreeSort;
+  onRouteChange?: (patch: TreeRoutePatch) => void;
+}) {
   const [copyError, setCopyError] = useState<string | null>(null);
+  const setQ = (v: string) => onRouteChange?.({ q: v });
+  const setF = (v: Filter) => onRouteChange?.({ status: v });
+  const setSort = (v: TreeSort) => onRouteChange?.({ sort: v });
+  const setSelected = (id: string | null) => onRouteChange?.({ taskId: id });
 
   const filtered = useMemo(() => {
     let r = [...tasks];
@@ -63,11 +87,12 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
       const qq = q.toLowerCase();
       r = r.filter((t) => `${t.id} ${t.title} ${t.why} ${t.done}`.toLowerCase().includes(qq));
     }
-    if (f !== 'all') r = r.filter((t) => t.status === f);
+    if (status !== 'all') r = r.filter((t) => t.status === status);
     r.sort((a, b) => (sort === 'status' ? a.status.localeCompare(b.status) || a.id.localeCompare(b.id) : a.id.localeCompare(b.id)));
     return r;
-  }, [tasks, q, f, sort]);
+  }, [tasks, q, status, sort]);
 
+  const selected = taskId;
   const sel = useMemo(() => filtered.find((t) => t.id === selected) ?? tasks.find((t) => t.id === selected) ?? filtered[0] ?? tasks[0] ?? null, [filtered, tasks, selected]);
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: tasks.length };
@@ -75,7 +100,9 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
     return c;
   }, [tasks]);
 
-  useEffect(() => { if (!selected && filtered[0]) setSelected(filtered[0].id); }, [filtered, selected]);
+  useEffect(() => {
+    if (!selected && filtered[0]) setSelected(filtered[0].id);
+  }, [filtered, selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const h = (e: Event) => setQ((e as CustomEvent).detail || '');
@@ -92,7 +119,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
       window.removeEventListener('super-search' as unknown as string, h as EventListener);
       window.removeEventListener('super-nav' as unknown as string, nav as EventListener);
     };
-  }, [filtered, selected]);
+  }, [filtered, selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copy = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setCopyError(null); }
@@ -101,7 +128,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-      <Toolbar q={q} setQ={setQ} f={f} setF={setF} sort={sort} setSort={setSort} counts={counts} total={tasks.length} filtered={filtered.length} />
+      <Toolbar q={q} setQ={setQ} f={status} setF={setF} sort={sort} setSort={setSort} counts={counts} total={tasks.length} filtered={filtered.length} />
       <Collapsible title="Dependency graph" storageKey="tree-dag" meta={<span className="mono">{tasks.length} nodes · drag to pan · ⌘+wheel zoom</span>} compact>
         <DagGraph tasks={tasks} selected={selected} onSelect={setSelected} bare />
       </Collapsible>
@@ -120,7 +147,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
                 <div className="empty-icon" aria-hidden><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5.5 8h5M8 5.5v5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg></div>
                 <h4>No tasks match</h4>
                 <p>Try a different filter or add a task:<br /><code>python3 -m super.cli task-add "Title" --done "check" --why "reason"</code></p>
-                <Button size="sm" onClick={() => { setQ(''); setF('all'); }}>Clear filters</Button>
+                <Button size="sm" onClick={() => onRouteChange?.({ q: '', status: 'all' })}>Clear filters</Button>
               </div>
             ) : (
               <div style={{ padding: 'var(--space-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>

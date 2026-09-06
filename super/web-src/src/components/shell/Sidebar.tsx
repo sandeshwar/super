@@ -7,9 +7,9 @@ import { Progress } from '../ui/Progress';
 import { Icons } from '../ui/Icon';
 import { Alert } from '../ui/Alert';
 import { userMessage } from '../../lib/errors';
+import { Link, type View } from '../../lib/router';
 import type { Stats } from './hooks/useAppData';
 
-type View = 'chat' | 'tree' | 'approve' | 'report';
 const VIEW_META: Record<View, { title: string; desc: string; icon: keyof typeof Icons }> = {
   chat: { title: 'Chat', desc: 'Grounded assistant · every reply verified against repo symbols', icon: 'chat' },
   tree: { title: 'Job Tree', desc: 'DAG of microtasks · leaf-only model, proven in order', icon: 'tree' },
@@ -19,7 +19,6 @@ const VIEW_META: Record<View, { title: string; desc: string; icon: keyof typeof 
 
 type Props = {
   view: View;
-  onViewChange: (v: View) => void;
   tasks: TaskNode[];
   gates: Record<string, { pass: number; reject: number }>;
   criticals: unknown[];
@@ -35,7 +34,7 @@ type Props = {
   refresh: () => void;
 };
 
-export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash, error, setError, offlinePending, mobileNav, refresh }: Props) {
+export function Sidebar({ view, tasks, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash, error, setError, offlinePending, mobileNav, refresh }: Props) {
   return (
     <aside className={`app-sidebar ${mobileNav ? 'open' : ''}`} aria-label="Sidebar">
       <div className="sidebar-top">
@@ -54,14 +53,10 @@ export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, wo
             const count = v === 'tree' ? tasks.length : v === 'approve' ? stats.pending : v === 'report' ? stats.proven : undefined;
             const isActive = view === v;
             return (
-              <button
+              <Link
                 key={v}
+                to={{ view: v }}
                 className={`nav-item ${isActive ? 'active' : ''}`}
-                onClick={() => {
-                  const doc = document as unknown as { startViewTransition?: (cb: () => void) => void };
-                  if (doc.startViewTransition) doc.startViewTransition(() => onViewChange(v));
-                  else onViewChange(v);
-                }}
                 aria-current={isActive ? 'page' : undefined}
               >
                 <Icon size={16} />
@@ -73,7 +68,7 @@ export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, wo
                   <span className="badge-count">{v === 'report' ? `${stats.proven}/${stats.total}` : count}</span>
                 )}
                 {v === 'chat' && isActive && <span className="dot-live" style={{ background: 'var(--accent)' }} aria-hidden />}
-              </button>
+              </Link>
             );
           })}
         </div>

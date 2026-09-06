@@ -3,9 +3,9 @@ import { Icons } from '../ui/Icon';
 import { ThemeToggle } from '../ThemeToggle';
 import { modelShort } from '../../utils/format';
 import { userMessage } from '../../lib/errors';
+import type { View } from '../../lib/router';
 import type { Stats } from './hooks/useAppData';
 
-type View = 'chat' | 'tree' | 'approve' | 'report';
 const VIEW_META: Record<View, { title: string; desc: string; icon: keyof typeof Icons }> = {
   chat: { title: 'Chat', desc: 'Grounded assistant · every reply verified against repo symbols', icon: 'chat' },
   tree: { title: 'Job Tree', desc: 'DAG of microtasks · leaf-only model, proven in order', icon: 'tree' },

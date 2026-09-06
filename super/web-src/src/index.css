@@ -194,7 +194,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--fg-1);line-
 }
 .nav-item{
   display:flex;align-items:center;gap:var(--space-2);
-  width:100%;text-align:left;
+  width:100%;text-align:left;text-decoration:none;box-sizing:border-box;
   padding:6px var(--space-2);border-radius:var(--radius-sm);
   font:var(--font-weight-medium) var(--text-base) var(--font-sans);color:var(--fg-2);
   background:transparent;border:1px solid transparent;

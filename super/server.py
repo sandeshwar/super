@@ -113,6 +113,23 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"error": "unauthorized — supply ?token= or Authorization: Bearer", "code": 401}, 401)
         return False
 
+    def _prefers_html(self) -> bool:
+        """Browser navigations prefer text/html; curl/fetch keep JSON on colliding paths."""
+        accept = (self.headers.get("Accept") or "").lower()
+        if "text/html" not in accept:
+            return False
+        html_i = accept.find("text/html")
+        json_i = accept.find("application/json")
+        return json_i < 0 or html_i < json_i
+
+    def _is_spa_path(self, path: str) -> bool:
+        if path in ("/", "/chat", "/tree", "/approve", "/report"):
+            return True
+        for prefix in ("/chat/", "/tree/", "/approve/", "/report/"):
+            if path.startswith(prefix):
+                return True
+        return False
+
     # -- routes ----------------------------------------------------------
     def do_GET(self) -> None:
         assert CFG is not None
@@ -121,7 +138,7 @@ class Handler(BaseHTTPRequestHandler):
 
         u = urlparse(self.path)
         q = parse_qs(u.query)
-        if u.path == "/":
+        if u.path == "/" or (self._prefers_html() and self._is_spa_path(u.path)):
             return self._send_file("index.html")
         if u.path.startswith("/assets/") or u.path in ("/favicon.svg", "/icons.svg"):
             return self._send_file(u.path.lstrip("/"))
@@ -208,6 +225,9 @@ class Handler(BaseHTTPRequestHandler):
             from . import tasks as _tasks
             leaf = _tasks.leaf(CFG)
             return self._send_json({"leaf": leaf, "rendered": _tasks.render_leaf(leaf) if leaf else "No actionable leaf"})
+        # Deep-link fallback for unknown SPA paths (no file extension)
+        if self._prefers_html() and "." not in u.path.rsplit("/", 1)[-1]:
+            return self._send_file("index.html")
         return self._send_json({"error": "not found", "code": 404}, 404)
 
     def do_POST(self) -> None:
