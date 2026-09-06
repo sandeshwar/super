@@ -3,6 +3,7 @@ import type { TaskNode } from '../types';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { Card, CardHead } from './ui/Card';
+import { Collapsible } from './ui/Collapsible';
 import { Input, Select } from './ui/Input';
 import { DagGraph } from './Graph/DagGraph';
 import { userMessage } from '../lib/errors';
@@ -26,7 +27,7 @@ function Toolbar({
   counts: Record<string, number>; total: number; filtered: number;
 }) {
   return (
-    <Card style={{ padding: 'var(--space-3)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
+    <Card style={{ padding: 'var(--space-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
       <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexWrap: 'wrap' }}>
         {(['all', 'waiting', 'doing', 'proven', 'blocked'] as Filter[]).map((k) => (
           <Button key={k} size="sm" variant={f === k ? 'primary' : 'default'} onClick={() => setF(k)} style={f === k ? {} : { background: 'var(--bg-1)' }}>
@@ -99,11 +100,13 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
       <Toolbar q={q} setQ={setQ} f={f} setF={setF} sort={sort} setSort={setSort} counts={counts} total={tasks.length} filtered={filtered.length} />
-      <DagGraph tasks={tasks} selected={selected} onSelect={setSelected} />
+      <Collapsible title="Dependency graph" storageKey="tree-dag" meta={<span className="mono">{tasks.length} nodes · drag to pan · ⌘+wheel zoom</span>} compact>
+        <DagGraph tasks={tasks} selected={selected} onSelect={setSelected} bare />
+      </Collapsible>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 'var(--space-4)', minHeight: 520 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 'var(--space-3)' }}>
         {/* List */}
         <Card style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <CardHead>
@@ -128,8 +131,8 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
                       key={t.id}
                       onClick={() => setSelected(t.id)}
                       style={{
-                        display: 'flex', alignItems: 'center', gap: 'var(--space-3)', width: '100%', textAlign: 'left',
-                        padding: 'var(--space-3)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 'var(--space-2)', width: '100%', textAlign: 'left',
+                        padding: 'var(--space-2)', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
                         background: isActive ? 'var(--accent-soft)' : 'var(--bg-2)',
                         border: `1px solid ${isActive ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
                         transition: 'background var(--ease), border-color var(--ease)',
@@ -167,24 +170,24 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
         </Card>
 
         {/* Detail */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', overflow: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', overflow: 'auto' }}>
           {sel ? (
             <>
               <Card style={{ overflow: 'hidden' }}>
-                <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-3)' }}>
+                <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
                     <div style={{ minWidth: 0 }}>
-                      <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-2)' }}>
+                      <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-1)' }}>
                         <Badge variant="neutral" style={{ fontSize: 'var(--text-xs)' }}># {sel.id}</Badge>
                         <StatusBadge status={sel.status} />
                         {sel.parent && <Badge variant="neutral">parent {sel.parent}</Badge>}
                       </div>
-                      <h3 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', color: 'var(--fg-0)', lineHeight: 'var(--leading-tight)' }}>{sel.title}</h3>
+                      <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', color: 'var(--fg-0)', lineHeight: 'var(--leading-tight)' }}>{sel.title}</h3>
                     </div>
                     <Badge variant="accent" style={{ fontSize: 'var(--text-xs)' }}>{sel.needs.length} deps</Badge>
                   </div>
 
-                  <div style={{ display: 'grid', gap: 'var(--space-3)' }}>
+                  <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
                     {[
                       { k: 'WHY', v: sel.why || '—' },
                       { k: 'DONE LOOKS LIKE', v: sel.done || '—' },
@@ -202,7 +205,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
                   {copyError && <div className="alert alert--error" style={{ fontSize: 'var(--text-sm)' }}>{copyError}</div>}
                 </div>
 
-                <div style={{ padding: 'var(--space-3) var(--space-4)', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-1)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                <div style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-1)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                   <span className="mono small muted" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}><span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: sel.status === 'proven' ? 'var(--green)' : sel.status === 'blocked' ? 'var(--red)' : 'var(--yellow)', display: 'inline-block' }} aria-hidden />{sel.status}</span>
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
                     <Button size="sm" variant="default" onClick={() => void copy(sel.id)}>copy id</Button>
@@ -211,8 +214,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
                 </div>
               </Card>
 
-              <Card style={{ padding: 'var(--space-3)' }}>
-                <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>DEPENDENCY TRACE</div>
+              <Collapsible title="Dependency trace" storageKey="tree-trace" defaultOpen={false} compact meta={<span className="mono">{sel.needs.length ? `${sel.needs.length} deps` : 'leaf'} → #{sel.id}</span>}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                   {(sel.needs.length ? sel.needs : ['∅ leaf']).map((n) => (
                     <Badge key={n} variant={n === '∅ leaf' ? 'proven' : 'neutral'} style={{ fontSize: 'var(--text-xs)' }}>{n}</Badge>
@@ -224,7 +226,7 @@ export default function TreeView({ tasks, gates }: { tasks: TaskNode[]; gates?: 
                 <div style={{ fontSize: 'var(--text-sm)', color: 'var(--fg-3)', lineHeight: 'var(--leading-normal)' }}>
                   Leaf holds one job. The harness holds the forest — model sees only this card + compiled memory + repo overview.
                 </div>
-              </Card>
+              </Collapsible>
             </>
           ) : (
             <Card style={{ padding: 'var(--space-10)', textAlign: 'center', color: 'var(--fg-3)' }}>

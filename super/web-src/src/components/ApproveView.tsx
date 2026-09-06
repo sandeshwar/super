@@ -4,6 +4,7 @@ import type { TaskNode } from '../types';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { Card, CardHead } from './ui/Card';
+import { Collapsible } from './ui/Collapsible';
 import { Input } from './ui/Input';
 import { Progress } from './ui/Progress';
 import { Alert } from './ui/Alert';
@@ -15,7 +16,7 @@ function DiffView({ diff }: { diff: string }) {
   return (
     <div style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', background: 'var(--bg-0)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)', overflow: 'hidden' }}>
       <div style={{ padding: 'var(--space-1) var(--space-2)', background: 'var(--bg-1)', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600, color: 'var(--fg-3)', fontSize: 'var(--text-2xs)', letterSpacing: 'var(--tracking-wide)' }}>DIFF — Monaco view (syntax)</div>
-      <pre style={{ margin: 0, padding: 'var(--space-2)', overflow: 'auto', maxHeight: 220, lineHeight: '1.5' }}>
+      <pre style={{ margin: 0, padding: 'var(--space-2)', overflow: 'auto', maxHeight: 180, lineHeight: '1.5' }}>
         {lines.map((l, i) => {
           const isAdd = l.startsWith('+') && !l.startsWith('+++');
           const isDel = l.startsWith('-') && !l.startsWith('---');
@@ -124,19 +125,19 @@ export default function ApproveView({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .85fr', gap: 'var(--space-4)', minHeight: 520 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .85fr', gap: 'var(--space-3)' }}>
       {/* Left: review */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         <Card style={{ overflow: 'hidden' }}>
           <CardHead>
             <h3><svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--accent)' }} aria-hidden><path d="M8 14A6 6 0 108 2a6 6 0 000 12z" stroke="currentColor" strokeWidth="1.2"/><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg> Awaiting review</h3>
             <Badge variant={cand.status === 'waiting' ? 'waiting' : cand.status === 'doing' ? 'doing' : 'neutral'}>{cand.status}</Badge>
           </CardHead>
 
-          <div style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             <div>
               <div className="mono small muted" style={{ fontSize: 'var(--text-2xs)', letterSpacing: 'var(--tracking-wide)', fontWeight: 700 }}>TASK {cand.id}</div>
-              <h3 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', marginTop: 2 }}>{cand.title}</h3>
+              <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', marginTop: 2 }}>{cand.title}</h3>
               <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
                 <Badge variant="neutral">needs: {cand.needs.length ? cand.needs.join(', ') : 'nothing'}</Badge>
                 {cand.blocks?.length ? <Badge variant="neutral">blocks: {cand.blocks.join(', ')}</Badge> : null}
@@ -160,29 +161,31 @@ export default function ApproveView({
             </div>
 
             {/* Blast radius */}
-            <Card style={{ overflow: 'hidden', background: 'var(--bg-1)' }}>
-              <div style={{ padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>BLAST RADIUS · ROLLBACK 1-CLICK</span>
-                <Badge variant={blastRadius==='large'?'blocked':blastRadius==='medium'?'waiting':'neutral'}>{blastRadius} · {blastFiles.length} file{blastFiles.length!==1&&'s'}</Badge>
-              </div>
-              <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            <Collapsible
+              title="Blast radius · rollback 1-click"
+              storageKey="approve-blast"
+              compact
+              meta={<Badge variant={blastRadius==='large'?'blocked':blastRadius==='medium'?'waiting':'neutral'}>{blastRadius} · {blastFiles.length} file{blastFiles.length!==1&&'s'}</Badge>}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-                  {blastFiles.map(f=> <span key={f} style={{ background: 'var(--bg-0)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: 4 }}>{f}</span>)}
+                  {blastFiles.map(f=> <span key={f} style={{ background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: 4 }}>{f}</span>)}
                 </div>
-                <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-                  <Button variant="outline" onClick={()=> void act('rollback')} style={{ fontSize: 'var(--text-xs)', height: 28 }}>Rollback to #{cand.id}</Button>
-                  <span className="small muted" style={{ fontSize: 'var(--text-xs)', alignSelf: 'center' }}>Reopens proven ≥ #{cand.id}</span>
+                <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                  <Button size="sm" variant="outline" onClick={()=> void act('rollback')}>Rollback to #{cand.id}</Button>
+                  <span className="small muted" style={{ fontSize: 'var(--text-xs)' }}>Reopens proven ≥ #{cand.id}</span>
                 </div>
               </div>
-            </Card>
+            </Collapsible>
 
             {/* Critic evidence — strongest first */}
-            <Card style={{ overflow: 'hidden', background: 'var(--bg-1)' }}>
-              <div style={{ padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>CRITIC SAYS (first)</span>
-                <span className="mono small" style={{ fontSize: 'var(--text-xs)', color: gateReject ? 'var(--yellow)' : 'var(--green)' }}>{gatePass} pass · {gateReject} reject{strongestGate ? ` · worst: ${strongestGate[0]} ${strongestGate[1].reject} rejects` : ''}</span>
-              </div>
-              <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            <Collapsible
+              title="Critic says (first)"
+              storageKey="approve-critic"
+              compact
+              meta={<span className="mono small" style={{ fontSize: 'var(--text-xs)', color: gateReject ? 'var(--yellow)' : 'var(--green)' }}>{gatePass} pass · {gateReject} reject</span>}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
                 <Progress value={gatePass} max={gatePass + gateReject || 1} />
                 <Alert variant={gateReject ? 'warning' : 'success'} style={{ fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)' }}>
                   {strongestGate && strongestGate[1].reject>0 ? (
@@ -201,10 +204,12 @@ export default function ApproveView({
                   ))}
                 </div>
               </div>
-            </Card>
+            </Collapsible>
 
-            {/* Diff — Monaco-like */}
-            <DiffView diff={mockDiff} />
+            {/* Diff — Monaco-like, collapsed by default */}
+            <Collapsible title="Diff" storageKey="approve-diff" defaultOpen={false} compact meta={<span className="mono small muted">{blastFiles[0] || 'no files'}</span>}>
+              <DiffView diff={mockDiff} />
+            </Collapsible>
             <div style={{ display: 'flex', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>
               <Badge variant="neutral">Checks: type ok · tests 12/12 · secrets ok</Badge>
               <Badge variant={cand.proof? 'proven':'warning'}>docs {cand.proof? 'linked':'missing'}</Badge>
@@ -218,13 +223,13 @@ export default function ApproveView({
       </div>
 
       {/* Right: queue + decision */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
         <Card style={{ overflow: 'hidden' }}>
           <CardHead>
             <h3>Queue</h3>
             <Badge variant="accent">{candidates.length} pending</Badge>
           </CardHead>
-          <div style={{ maxHeight: 220, overflow: 'auto' }}>
+          <div style={{ maxHeight: 180, overflow: 'auto' }}>
             {candidates.map((t) => {
               const active = t.id === cand.id;
               return (
@@ -280,10 +285,9 @@ export default function ApproveView({
           </div>
         </Card>
 
-        <Card style={{ padding: 'var(--space-3)', background: 'var(--bg-1)', borderStyle: 'dashed' }}>
-          <div className="small" style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: 'var(--fg-1)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden><circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M8 7v3M8 5.5h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg> Trust & fatigue</div>
-          <div className="small muted" style={{ marginTop: 'var(--space-2)', lineHeight: 'var(--leading-normal)', fontSize: 'var(--text-sm)' }}>Approving reuses <span className="mono">trust.fatigue</span> — if you approve &gt;95% in 40, you’re flagged as fatigued and routing escalates to human-required. Attention budget is 10/task.</div>
-        </Card>
+        <Collapsible title="Trust & fatigue" storageKey="approve-trust" defaultOpen={false} compact>
+          <div className="small muted" style={{ lineHeight: 'var(--leading-normal)', fontSize: 'var(--text-sm)' }}>Approving reuses <span className="mono">trust.fatigue</span> — if you approve &gt;95% in 40, you’re flagged as fatigued and routing escalates to human-required. Attention budget is 10/task.</div>
+        </Collapsible>
       </div>
     </div>
   );

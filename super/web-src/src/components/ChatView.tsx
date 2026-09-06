@@ -21,7 +21,7 @@ export default function ChatView() {
   } = useChat();
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 'var(--space-4)', height: 'calc(100vh - 132px)', minHeight: 520 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 'var(--space-3)', height: 'calc(100vh - 108px)', minHeight: 440 }}>
       <SessionsPanel
         sessions={sessions}
         filtered={filtered}

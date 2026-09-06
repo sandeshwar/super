@@ -5,13 +5,14 @@ import { StatusBadge } from './TreeView';
 import { Badge } from './ui/Badge';
 import { Button } from './ui/Button';
 import { Card, CardHead } from './ui/Card';
+import { Collapsible } from './ui/Collapsible';
 import { Progress } from './ui/Progress';
 import { useVirtual } from '../hooks/useVirtual';
 import { Alert } from './ui/Alert';
 
 function Kpi({ label, value, sub, color, icon }: { label: string; value: string; sub: string; color: string; icon: React.ReactNode }) {
   return (
-    <Card style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+    <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>{label}</span>
         <span style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--bg-3)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', color }}>{icon}</span>
@@ -67,7 +68,7 @@ export default function ReportView({
   useEffect(() => { try { localStorage.setItem('super_cols', JSON.stringify(cols)); } catch {} }, [cols]);
   const tableRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
-  const rowH = 48;
+  const rowH = 40;
   const containerH = 380;
   const virt = useVirtual(tasks.length, rowH, containerH, scrollTop);
   const toggleCol = (k: string) => setCols((c) => ({ ...c, [k]: !c[k] }));
@@ -104,7 +105,7 @@ export default function ReportView({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
       {/* KPI row */}
       <div className="kpi-grid">
         <Kpi label="Proven" value={`${proven}/${total || '—'}`} sub={`${pct}% complete · ${waiting} waiting · ${doing} doing`} color={pct === 100 ? 'var(--green)' : 'var(--fg-0)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>} />
@@ -114,16 +115,17 @@ export default function ReportView({
       </div>
 
       {/* Provenance + gates */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .8fr', gap: 'var(--space-3)' }}>
-        <Card style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+      <Collapsible title="Provenance & gates" className="collapsible-bare" storageKey="report-prov" meta={<span className="mono small muted">{proven}/{total} proven · {passRate}% gate pass</span>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .8fr', gap: 'var(--space-2)' }}>
+        <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>PROVENANCE</span>
             <span className="mono small" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>{proven} of {total} · leaf-only + fork-per-task</span>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-4)', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
             {/* Flat gauge — no conic gradient, solid ring + progress */}
-            <div style={{ width: 96, height: 96, borderRadius: 'var(--radius-full)', background: 'var(--bg-1)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
-              <div style={{ width: 84, height: 84, borderRadius: 'var(--radius-full)', background: 'var(--bg-2)', border: `3px solid ${pct === 100 ? 'var(--green)' : 'var(--accent)'}`, display: 'grid', placeItems: 'center' }}>
+            <div style={{ width: 80, height: 80, borderRadius: 'var(--radius-full)', background: 'var(--bg-1)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', flexShrink: 0 }}>
+              <div style={{ width: 68, height: 68, borderRadius: 'var(--radius-full)', background: 'var(--bg-2)', border: `3px solid ${pct === 100 ? 'var(--green)' : 'var(--accent)'}`, display: 'grid', placeItems: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800, letterSpacing: 'var(--tracking-tight)', color: pct === 100 ? 'var(--green)' : 'var(--fg-0)' }}>{pct}<span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-3)' }}>%</span></div>
                   <div className="mono" style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>proven</div>
@@ -152,7 +154,7 @@ export default function ReportView({
           </div>
         </Card>
 
-        <Card style={{ padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+        <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>GATE TREND</span>
             <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)' }}>{totalGates} events</Badge>
@@ -171,6 +173,7 @@ export default function ReportView({
           <div className="small muted" style={{ fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' }}>Catch-rate is per-gate (grounding, duplication, mutation…) — see breakdown below. Fatigued reviewers are escalated.</div>
         </Card>
       </div>
+      </Collapsible>
 
       {/* Task table — virtualized + density controls */}
       <Card style={{ overflow: 'hidden' }}>
@@ -185,12 +188,16 @@ export default function ReportView({
             <Button size="sm" variant="default" onClick={()=> void doRevert('')}>revert</Button>
           </span>
         </CardHead>
-        <div style={{ padding: 'var(--space-2) var(--space-3)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-1)' }}>
-          {(['id','task','status','why','proof'] as const).map((k) => (
-            <label key={k} className="mono small" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 'var(--text-xs)' }}>
-              <input type="checkbox" checked={(cols as Record<string,boolean>)[k]} onChange={() => toggleCol(k)} style={{ accentColor: 'var(--accent)' }} /> {k}
-            </label>
-          ))}
+        <div style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-1)', padding: '1px var(--space-1)' }}>
+          <Collapsible title="Columns" className="collapsible-bare" compact defaultOpen={false} meta={<span className="mono small muted">{Object.values(cols).filter(Boolean).length}/5 shown</span>}>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', paddingBottom: 'var(--space-2)' }}>
+              {(['id','task','status','why','proof'] as const).map((k) => (
+                <label key={k} className="mono small" style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 'var(--text-xs)' }}>
+                  <input type="checkbox" checked={(cols as Record<string,boolean>)[k]} onChange={() => toggleCol(k)} style={{ accentColor: 'var(--accent)' }} /> {k}
+                </label>
+              ))}
+            </div>
+          </Collapsible>
         </div>
         <div
           ref={tableRef}
@@ -240,11 +247,7 @@ export default function ReportView({
       </Card>
 
       {/* Gate breakdown */}
-      <Card style={{ padding: 'var(--space-4)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
-          <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>GATE BREAKDOWN</span>
-          <span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>{Object.keys(gates).length} gates · best-of-5 + early-abort</span>
-        </div>
+      <Collapsible title="Gate breakdown" storageKey="report-gates" compact meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>{Object.keys(gates).length} gates · best-of-5 + early-abort</span>}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--space-2)' }}>
           {Object.entries(gates).map(([gate, s]) => {
             const tot = s.pass + s.reject;
@@ -262,10 +265,17 @@ export default function ReportView({
           })}
           {Object.keys(gates).length === 0 && <div className="small muted" style={{ padding: 'var(--space-3)', background: 'var(--bg-1)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>No gate events yet — chat or write to generate telemetry</div>}
         </div>
-      </Card>
+      </Collapsible>
 
       {/* Security substrate — SBOM, sink, waivers, checklist (doc 02 §6, 03 §5) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--space-3)' }}>
+      <Collapsible
+        title="Security substrate"
+        storageKey="report-sec"
+        defaultOpen={false}
+        compact
+        meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>SBOM {sbom?.count ?? 0} · sink {sink?.entries ?? 0} · waivers {waivers.length}</span>}
+      >
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-2)' }}>
         <Card style={{ padding: 'var(--space-3)' }}>
           <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>SBOM — {sbom?.count ?? 0} packages</div>
           {sbom && sbom.packages.length > 0 ? (
@@ -321,16 +331,19 @@ export default function ReportView({
           )}
         </Card>
       </div>
+      </Collapsible>
 
       {/* Criticals */}
       {criticals.length > 0 && (
-        <Card style={{ borderColor: 'var(--red-border)', overflow: 'hidden' }}>
-          <div style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--red-bg)', borderBottom: '1px solid var(--red-border)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style={{ color: 'var(--red)' }} aria-hidden><path d="M8 3l6 10H2L8 3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
-            <span style={{ fontWeight: 700, fontSize: 'var(--text-sm)', letterSpacing: '0.04em', color: 'var(--red)' }}>OPEN CRITICALS — {criticals.length}</span>
-            <span className="mono small" style={{ marginLeft: 'auto', color: 'var(--red)', fontSize: 'var(--text-xs)' }}>{criticals.length} require waiver or fix</span>
-          </div>
-          <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+        <Collapsible
+          title={`Open criticals — ${criticals.length}`}
+          storageKey="report-criticals"
+          compact
+          badge={<Badge variant="blocked" style={{ fontSize: 'var(--text-2xs)' }}>{criticals.length}</Badge>}
+          meta={<span className="mono small" style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>require waiver or fix</span>}
+          style={{ borderColor: 'var(--red-border)' }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
             {(criticals as Array<{ text?: string; layer?: string; message?: string; severity?: string }>).map((c, i) => (
               <div key={i} style={{ padding: 'var(--space-2) var(--space-3)', background: 'var(--bg-1)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-base)', color: 'var(--fg-1)', display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start' }}>
                 <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: 'var(--red)', marginTop: 7, flexShrink: 0 }} aria-hidden />
@@ -339,7 +352,7 @@ export default function ReportView({
               </div>
             ))}
           </div>
-        </Card>
+        </Collapsible>
       )}
 
       <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--fg-3)', padding: 'var(--space-1) var(--space-1)' }}>

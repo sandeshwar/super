@@ -18,10 +18,10 @@ type Props = {
 
 export function SessionsPanel({ sessions, filtered, activeId, filter, onFilter, onNewChat, onSelect, onDelete, onRename }: Props) {
   return (
-    <Card style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: 'var(--space-3)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-        <Button variant="primary" block onClick={onNewChat} style={{ justifyContent: 'center' }}>
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+    <Card style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ padding: 'var(--space-2)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+        <Button variant="primary" size="sm" block onClick={onNewChat} style={{ justifyContent: 'center' }}>
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           New chat
         </Button>
         <div style={{ position: 'relative' }}>
@@ -30,7 +30,7 @@ export function SessionsPanel({ sessions, filtered, activeId, filter, onFilter, 
         </div>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto', padding: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--space-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
         {filtered.map((s) => (
           <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => onSelect(s.id)} onDelete={() => onDelete(s.id)} onRename={(t) => onRename(s.id, t)} />
         ))}

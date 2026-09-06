@@ -36,7 +36,7 @@ function layout(tasks: TaskNode[]): Map<string, Pos> {
   return pos;
 }
 
-export function DagGraph({ tasks, onSelect, selected }: { tasks: TaskNode[]; onSelect: (id: string) => void; selected?: string | null }) {
+export function DagGraph({ tasks, onSelect, selected, bare }: { tasks: TaskNode[]; onSelect: (id: string) => void; selected?: string | null; bare?: boolean }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
@@ -86,17 +86,17 @@ export function DagGraph({ tasks, onSelect, selected }: { tasks: TaskNode[]; onS
   }
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', background: 'var(--bg-1)', position: 'relative' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border)', alignItems: 'center', background: 'var(--bg-2)' }}>
+    <div style={bare ? { overflow: 'hidden', position: 'relative' } : { border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden', background: 'var(--bg-1)', position: 'relative' }}>
+      <div style={{ display: 'flex', gap: 'var(--space-2)', padding: 'var(--space-1) var(--space-2)', borderBottom: '1px solid var(--border)', alignItems: 'center', background: 'var(--bg-2)' }}>
         <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>DAG</span>
-        <span className="mono small muted">{tasks.length} nodes · drag to pan · ⌘+wheel zoom</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+        {!bare && <span className="mono small muted">{tasks.length} nodes · drag to pan · ⌘+wheel zoom</span>}
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-1)', alignItems: 'center' }}>
           <button className="btn btn-sm" onClick={() => setZoom((z) => Math.min(1.6, z + 0.12))}>+</button>
           <button className="btn btn-sm" onClick={() => setZoom((z) => Math.max(0.6, z - 0.12))}>−</button>
           <button className="btn btn-sm" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>reset</button>
         </span>
       </div>
-      <div style={{ overflow: 'hidden', height: 360, cursor: dragging.current ? 'grabbing' : 'grab' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <div style={{ overflow: 'hidden', height: 240, cursor: dragging.current ? 'grabbing' : 'grab' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <svg
           ref={svgRef}
           width={bounds.w * zoom}
@@ -134,7 +134,7 @@ export function DagGraph({ tasks, onSelect, selected }: { tasks: TaskNode[]; onS
           })}
         </svg>
       </div>
-      <div className="small muted" style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+      <div className="small muted" style={{ padding: 'var(--space-1) var(--space-2)', borderTop: '1px solid var(--border)', display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 99, background: 'var(--green)' }} /> proven</span>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 99, background: 'var(--yellow)' }} /> waiting</span>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><span style={{ width: 8, height: 8, borderRadius: 99, background: 'var(--blue)' }} /> doing</span>

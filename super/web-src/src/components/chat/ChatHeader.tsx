@@ -19,7 +19,7 @@ export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRenam
   const [headerEditing, setHeaderEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   return (
-    <div style={{ padding: 'var(--space-2) var(--space-4)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', background: 'var(--bg-2)', flexShrink: 0 }}>
+    <div style={{ padding: 'var(--space-1) var(--space-3)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', background: 'var(--bg-2)', flexShrink: 0 }}>
       <Avatar role="assistant" />
       <div style={{ lineHeight: 1.2, flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 'var(--text-base)', color: 'var(--fg-0)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
@@ -63,9 +63,8 @@ export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRenam
           {activeId && <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)', flexShrink: 0 }}>{shortId(activeId, 8)}</Badge>}
           <Badge variant="accent" style={{ fontSize: 'var(--text-2xs)', flexShrink: 0 }}><span className="badge-dot" aria-hidden /> Best-of-5</Badge>
         </div>
-        <div className="small muted" style={{ fontSize: 'var(--text-xs)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>{messages.length ? `${messages.length} messages · streaming via /api/chat/stream` : 'Model sees current leaf + verified memory automatically'}</span>
-          {activeId && messages.length > 0 && <span className="mono" style={{ marginLeft: 'auto', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>✦ auto-rename available</span>}
+        <div className="small muted" style={{ fontSize: 'var(--text-xs)', marginTop: 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span className="truncate">{messages.length ? `${messages.length} messages · streaming via /api/chat/stream` : 'Model sees current leaf + verified memory automatically'}</span>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>

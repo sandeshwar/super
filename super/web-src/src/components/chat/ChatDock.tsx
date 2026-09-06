@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { Collapsible } from '../ui/Collapsible';
 
 const SLASH_COMMANDS = [
   { cmd: '/add-task', desc: 'Add task: /add-task Title --done "check"' },
@@ -34,7 +35,7 @@ type Props = {
 export function ChatDock({ input, busy, messagesLen, cost, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex, onClosePopovers, onInput, onSend, onStop, onShare, onFile, inputRef }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="chat-dock" style={{ padding: 'var(--space-3)', borderTop: '1px solid var(--border)', background: 'var(--bg-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+    <div className="chat-dock" style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border)', background: 'var(--bg-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
       {showSlash && (
         <Card style={{ padding: 'var(--space-2)', position: 'relative', marginBottom: 'var(--space-1)' }}>
           {SLASH_COMMANDS.filter((c) => !slashFilter || c.cmd.includes(slashFilter) || c.desc.toLowerCase().includes(slashFilter)).map((c) => (
@@ -72,9 +73,9 @@ export function ChatDock({ input, busy, messagesLen, cost, showSlash, slashFilte
             placeholder="Ask about the repo…  (/ for commands, @ for files)"
             rows={1}
             style={{
-              width: '100%', resize: 'none', minHeight: 42, maxHeight: 120,
-              padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius)', background: 'var(--bg-2)', border: '1px solid var(--border)',
-              color: 'var(--fg-0)', font: '400 var(--text-base) var(--font-sans)', outline: 'none',
+              width: '100%', resize: 'none', minHeight: 36, maxHeight: 120,
+              padding: '6px var(--space-2)', borderRadius: 'var(--radius)', background: 'var(--bg-2)', border: '1px solid var(--border)',
+              color: 'var(--fg-0)', font: '400 var(--text-sm) var(--font-sans)', outline: 'none',
               lineHeight: 'var(--leading-normal)',
             }}
             aria-label="Message"
@@ -85,12 +86,12 @@ export function ChatDock({ input, busy, messagesLen, cost, showSlash, slashFilte
           </div>
         </div>
         {busy ? (
-          <Button variant="ghost" onClick={onStop} style={{ height: 42, padding: '0 var(--space-3)', borderRadius: 'var(--radius)' }} aria-label="Stop generation">
+          <Button variant="ghost" onClick={onStop} style={{ height: 36, padding: '0 var(--space-2)', borderRadius: 'var(--radius)' }} aria-label="Stop generation">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
             Stop
           </Button>
         ) : (
-          <Button variant="primary" onClick={onSend} disabled={!input.trim()} style={{ height: 42, padding: '0 var(--space-4)', borderRadius: 'var(--radius)' }}>
+          <Button variant="primary" onClick={onSend} disabled={!input.trim()} style={{ height: 36, padding: '0 var(--space-3)', borderRadius: 'var(--radius)' }}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M13.5 2.5L2.8 7.2l4.1 1.6 1.6 4.1 5-10.4z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>
             Send
           </Button>
@@ -98,9 +99,13 @@ export function ChatDock({ input, busy, messagesLen, cost, showSlash, slashFilte
         <Button size="sm" variant="ghost" onClick={onShare} title="Export chat" disabled={!messagesLen}>share</Button>
       </div>
       <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--fg-4)' }}>
-        <span className="mono">⌘+Enter to send · / commands · @ files</span>
-        <span style={{ width: 3, height: 3, borderRadius: 'var(--radius-full)', background: 'var(--fg-4)' }} aria-hidden />
-        <span>Backticked <code style={{ fontSize: 'var(--text-xs)' }}>symbols</code> are ground-checked</span>
+        <Collapsible title="Shortcuts" className="collapsible-bare" compact defaultOpen={false}>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', paddingBottom: 2 }}>
+            <span className="mono">⌘+Enter to send · / commands · @ files</span>
+            <span style={{ width: 3, height: 3, borderRadius: 'var(--radius-full)', background: 'var(--fg-4)' }} aria-hidden />
+            <span>Backticked <code style={{ fontSize: 'var(--text-xs)' }}>symbols</code> are ground-checked</span>
+          </div>
+        </Collapsible>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
           <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)' }}>{messagesLen} msgs</Badge>
           {busy && <Badge variant="accent" style={{ fontSize: 'var(--text-2xs)' }}>streaming</Badge>}

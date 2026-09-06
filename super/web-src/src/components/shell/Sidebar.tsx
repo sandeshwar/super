@@ -2,6 +2,7 @@ import { api } from '../../api';
 import type { TaskNode } from '../../types';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { Collapsible } from '../ui/Collapsible';
 import { Progress } from '../ui/Progress';
 import { Icons } from '../ui/Icon';
 import { Alert } from '../ui/Alert';
@@ -78,14 +79,19 @@ export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, wo
         </div>
 
         <div className="nav-section">
-          <div className="nav-label">Workspace {reloadFlash && <span className="badge accent" style={{ fontSize: 9, marginLeft: 6, padding: '1px 5px' }}>hot</span>}</div>
+          <Collapsible
+            title="Workspace"
+            className="collapsible-bare"
+            storageKey="side-workspace"
+            meta={reloadFlash ? <span className="badge accent" style={{ fontSize: 9, padding: '1px 5px' }}>hot</span> : undefined}
+          >
           <div style={{ display: 'flex', gap: 4, padding: '0 2px' }}>
             <input
               value={workspace}
               onChange={(e) => onWorkspaceChange(e.target.value)}
               placeholder="/path/to/workspace"
               aria-label="Workspace path"
-              style={{ flex: 1, fontSize: 'var(--text-xs)', padding: '6px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
+              style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', padding: '5px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
               onKeyDown={async (e) => {
                 if (e.key === 'Enter') {
                   try { await api.setWorkspace(workspace); setReloadFlash(true); setTimeout(() => setReloadFlash(false), 1500); void refresh(); } catch (err) { setError(userMessage(err)); }
@@ -103,10 +109,16 @@ export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, wo
             </button>
           </div>
           <div className="small muted" style={{ padding: '4px 8px', fontSize: 'var(--text-2xs)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace}>{workspace ? workspace.split('/').slice(-2).join('/') : '— no workspace'}</div>
+          </Collapsible>
         </div>
 
         <div className="nav-section">
-          <div className="nav-label">Health</div>
+          <Collapsible
+            title="Health"
+            className="collapsible-bare"
+            storageKey="side-health"
+            meta={<span className="mono" style={{ fontSize: 'var(--text-2xs)' }}>{stats.gatePass}/{stats.gateReject} rej</span>}
+          >
           <Card style={{ padding: 'var(--space-2)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span className="small muted" style={{ fontWeight: 600, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)' }}>GATES</span>
@@ -122,18 +134,19 @@ export function Sidebar({ view, onViewChange, tasks, gates, criticals, stats, wo
               {Object.keys(gates).length === 0 && <span className="small muted">No gate events yet</span>}
             </div>
           </Card>
+          </Collapsible>
         </div>
       </nav>
 
       <div className="sidebar-bottom">
-        <Card style={{ padding: 'var(--space-2) var(--space-3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
+        <Card style={{ padding: 'var(--space-2)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="k">Provenance</div>
             <div className="v">{stats.proven} <span className="muted" style={{ fontWeight: 400 }}>/ {stats.total || '—'}</span></div>
             <div className="proven-bar"><i style={{ width: `${stats.pct}%` }} /></div>
           </div>
-          <div style={{ textAlign: 'right' }}>
-            <div className="mono" style={{ fontSize: 'var(--text-lg)', fontWeight: 700, lineHeight: 1, color: stats.pct === 100 ? 'var(--green)' : 'var(--fg-0)' }}>{stats.pct}<span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-3)' }}>%</span></div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            <div className="mono" style={{ fontSize: 'var(--text-md)', fontWeight: 700, lineHeight: 1, color: stats.pct === 100 ? 'var(--green)' : 'var(--fg-0)' }}>{stats.pct}<span style={{ fontSize: 'var(--text-2xs)', fontWeight: 600, color: 'var(--fg-3)' }}>%</span></div>
             <div className="small muted" style={{ fontSize: 'var(--text-2xs)', marginTop: 'var(--space-1)' }}>{criticals.length ? `${criticals.length} critical` : 'All clear'}</div>
           </div>
         </Card>

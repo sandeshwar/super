@@ -25,7 +25,7 @@ type Props = {
 
 export function MessageList({ messages, busy, error, editingIdx, editDraft, setEditDraft, setEditingIdx, onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop, onSetInput, onClearError, bottomRef }: Props) {
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: 'var(--space-4)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', background: 'var(--bg-2)' }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', background: 'var(--bg-2)' }}>
       {messages.length === 0 && !busy && <EmptyState onPick={onSetInput} />}
       {messages.map((m, i) => (
         <MessageItem
