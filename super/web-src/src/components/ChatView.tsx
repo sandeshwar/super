@@ -23,11 +23,12 @@ export default function ChatView({
   contextLength?: number | null;
 }) {
   const {
-    sessions, filtered, activeId, setActiveId, messages, input, busy, error, setError, filter, setFilter,
+    sessions, filtered, activeId, messages, input, busy, error, setError, filter, setFilter,
     isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
     llmStats,
+    agentView, parentId, activeSpanId, selectSession, selectSpan, backToParent,
     send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention,
   } = useChat({ sessionId, onSessionIdChange, contextLength });
@@ -47,13 +48,16 @@ export default function ChatView({
         sessions={sessions}
         filtered={filtered}
         activeId={activeId}
+        parentId={parentId}
+        activeSpanId={activeSpanId}
         filter={filter}
         busy={busy}
         selectMode={selectMode}
         selectedIds={selectedIds}
         onFilter={setFilter}
         onNewChat={newChat}
-        onSelect={(id) => { setActiveId(id); setSessionsOpen(false); }}
+        onSelect={(id) => { selectSession(id); setSessionsOpen(false); }}
+        onSelectSpan={(pid, sp) => { selectSpan(pid, sp); setSessionsOpen(false); }}
         onDelete={(id) => void deleteChat(id)}
         onRename={(id, t) => void renameChat(id, t)}
         onToggleSelectMode={toggleSelectMode}
@@ -72,6 +76,8 @@ export default function ChatView({
           isRenaming={isRenaming}
           onRename={(id, t) => void renameChat(id, t)}
           busy={busy}
+          agentView={agentView}
+          onBackToParent={backToParent}
         />
         <ContextBar tokenStats={tokenStats} leaf={leaf} messagesLen={messages.length} cost={cost} llmStats={llmStats} busy={busy} />
         <MessageList

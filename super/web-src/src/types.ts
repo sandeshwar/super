@@ -34,12 +34,33 @@ export interface ToolEvent {
   content?: string;
 }
 
+/** Child specialist span shown in parent chat + session list. */
+export interface ChildSpan {
+  span_id: string;
+  agent_id?: string;
+  agent_name?: string;
+  role?: string;
+  status: 'running' | 'done' | 'error' | string;
+  summary: string;
+  goal?: string;
+  steps?: number | null;
+  session_id?: string;
+  child_session_id?: string | null;
+  run_id?: string;
+  started?: string;
+  ended?: string;
+  updated?: string;
+  tool?: string;
+  error?: string;
+}
+
 export interface ChatMessage {
   role: string;
   content: string;
   ts: string;
   gate?: GateInfo;
   tools?: ToolEvent[];
+  children?: ChildSpan[];
 }
 
 export interface Session {
@@ -48,6 +69,10 @@ export interface Session {
   created: string;
   updated: string;
   messages: ChatMessage[];
+  parent?: string | null;
+  span_id?: string | null;
+  agent_id?: string | null;
+  kind?: string;
 }
 
 export interface SessionSummary {
@@ -55,6 +80,9 @@ export interface SessionSummary {
   title: string;
   updated: string;
   n: number;
+  kind?: string;
+  spans?: ChildSpan[];
+  parent?: string | null;
 }
 
 export interface TaskNode {

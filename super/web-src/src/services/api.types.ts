@@ -39,6 +39,30 @@ export interface IStreamService {
 export interface IToolsCatalogService {
   getTools(): Promise<{ tools: Record<string, unknown> }>;
 }
+export type AgentSpec = {
+  id: string;
+  name: string;
+  role: string;
+  summary?: string;
+  system_addon?: string;
+  tools?: string[] | null;
+  groups?: string[] | null;
+  disabled?: string[];
+  status: string;
+  created_by?: string;
+  policy?: { may_write?: boolean; may_spawn?: boolean; may_manage_agents?: boolean };
+  created?: string;
+  updated?: string;
+};
+export interface IAgentsService {
+  listAgents(includeArchived?: boolean): Promise<{ agents: AgentSpec[] }>;
+  getAgent(id: string): Promise<{ agent: AgentSpec }>;
+  createAgent(body: Partial<AgentSpec> & { name: string }): Promise<{ ok: boolean; agent: AgentSpec }>;
+  updateAgent(id: string, patch: Record<string, unknown>): Promise<{ ok: boolean; agent: AgentSpec }>;
+  approveAgent(id: string): Promise<{ ok: boolean; agent: AgentSpec }>;
+  archiveAgent(id: string): Promise<{ ok: boolean; agent: AgentSpec }>;
+  runAgent(id: string, goal: string): Promise<{ ok: boolean; reply: string; span_id: string; run_id: string }>;
+}
 export interface ISecurityService {
   sbom(): Promise<{ packages: { name: string; version: string }[]; count: number }>;
   sink(): Promise<{ entries: number; violations: unknown[]; clean: boolean }>;
@@ -72,4 +96,4 @@ export interface IChatEditService {
   editMessage(id: string, idx: number, content: string): Promise<{ ok: boolean }>;
   leaf(): Promise<{ leaf: import('../types').TaskNode | null; rendered: string }>;
 }
-export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService;
+export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService;

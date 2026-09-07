@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamChat } from '../../../api';
-import type { ChatMessage, GateInfo, LlmStats, SessionSummary, TaskNode, ToolEvent } from '../../../types';
+import type { ChatMessage, ChildSpan, GateInfo, LlmStats, SessionSummary, TaskNode, ToolEvent } from '../../../types';
+
 import { AbortError, ApiError, userMessage } from '../../../lib/errors';
 import { shortId } from '../../../utils/format';
 
@@ -46,6 +47,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [llmStats, setLlmStats] = useState<LlmStats | null>(null);
+  const [agentView, setAgentView] = useState<{
+    parentId: string;
+    spanId: string;
+    agentName: string;
+    role?: string;
+  } | null>(null);
+
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -99,6 +107,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
     if (!activeId) {
       setMessages([]);
       setLlmStats(null);
+      setAgentView(null);
       return;
     }
     let cancelled = false;
@@ -109,12 +118,22 @@ export function useChat(opts: ChatRouteOpts = {}) {
         const last = [...s.messages].reverse().find((m) => m.role === 'assistant');
         const stats = last?.gate?.agent?.llm_stats;
         setLlmStats(stats && typeof stats === 'object' ? stats : null);
+        if (s.parent) {
+          setAgentView({
+            parentId: s.parent,
+            spanId: s.span_id || activeId,
+            agentName: s.title || 'agent',
+          });
+        } else {
+          setAgentView(null);
+        }
       })
       .catch((e) => {
         if (cancelled) return;
         const msg = userMessage(e).toLowerCase();
         if (msg.includes('no such session') || msg.includes('404') || (e instanceof ApiError && e.isNotFound)) {
           setActiveId(null);
+          setAgentView(null);
           setMessages([]);
           void loadSessions();
           setError('Previous chat not found — started a new one. Just resend.');
@@ -134,7 +153,47 @@ export function useChat(opts: ChatRouteOpts = {}) {
     return sessions.filter((s) => s.title.toLowerCase().includes(q) || s.id.toLowerCase().includes(q));
   }, [sessions, filter]);
 
-  const activeMeta = useMemo(() => sessions.find((s) => s.id === activeId) ?? null, [sessions, activeId]);
+  const activeMeta = useMemo(() => {
+    if (agentView && activeId) {
+      return {
+        id: activeId,
+        title: agentView.agentName,
+        updated: '',
+        n: messages.length,
+        kind: 'agent',
+        parent: agentView.parentId,
+      } satisfies SessionSummary;
+    }
+    return sessions.find((s) => s.id === activeId) ?? null;
+  }, [sessions, activeId, agentView, messages.length]);
+
+  const selectSession = useCallback((id: string) => {
+    setAgentView(null);
+    setActiveId(id);
+  }, [setActiveId]);
+
+  const selectSpan = useCallback((parentId: string, span: ChildSpan) => {
+    const childId = span.child_session_id;
+    if (!childId) {
+      setError('Sub-agent transcript not available for this run');
+      return;
+    }
+    setAgentView({
+      parentId,
+      spanId: span.span_id,
+      agentName: span.agent_name || 'agent',
+      role: span.role,
+    });
+    setActiveId(childId);
+  }, [setActiveId]);
+
+  const backToParent = useCallback(() => {
+    if (agentView?.parentId) {
+      const pid = agentView.parentId;
+      setAgentView(null);
+      setActiveId(pid);
+    }
+  }, [agentView, setActiveId]);
 
   const tokenStats = useMemo(() => {
     const chars = messages.reduce((a, m) => a + m.content.length, 0) + (leafRendered?.length || 0);
@@ -153,6 +212,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const send = useCallback(async (overrideText?: string, sendOpts: SendOpts = {}) => {
     const text = (overrideText ?? input).trim();
     if (!text || busyRef.current) return;
+    if (agentView) {
+      setError('Sub-agent chats are read-only — switch back to the parent chat to continue.');
+      return;
+    }
     if (text.startsWith('/')) {
       const [cmd, ...rest] = text.split(/\s+/);
       if (cmd === '/clear') { setMessages([]); setInput(''); return; }
@@ -217,7 +280,21 @@ export function useChat(opts: ChatRouteOpts = {}) {
     }
     let acc = '';
     const toolEvents: ToolEvent[] = [];
-    setMessages((m) => [...m, { role: 'assistant', content: '', ts: new Date().toISOString(), tools: [] }]);
+    const childMap = new Map<string, ChildSpan>();
+    const syncChildren = () => Array.from(childMap.values());
+    const patchSessionSpans = (sid: string | null, spans: ChildSpan[]) => {
+      if (!sid || !spans.length) return;
+      setSessions((prev) => prev.map((s) => {
+        if (s.id !== sid) return s;
+        const byId = new Map((s.spans || []).map((x) => [x.span_id, x]));
+        for (const sp of spans) byId.set(sp.span_id, sp);
+        const merged = Array.from(byId.values());
+        const running = merged.filter((x) => x.status === 'running');
+        const rest = merged.filter((x) => x.status !== 'running');
+        return { ...s, spans: [...running, ...rest].slice(0, 8) };
+      }));
+    };
+    setMessages((m) => [...m, { role: 'assistant', content: '', ts: new Date().toISOString(), tools: [], children: [] }]);
     const ac = new AbortController();
     abortRef.current = ac;
 
@@ -227,7 +304,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
         acc += d;
         setMessages((m) => {
           const c = [...m];
-          c[c.length - 1] = { ...c[c.length - 1], content: acc, tools: [...toolEvents] };
+          c[c.length - 1] = { ...c[c.length - 1], content: acc, tools: [...toolEvents], children: syncChildren() };
           return c;
         });
       }, {
@@ -245,7 +322,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
             toolEvents.push({ kind: 'call', name: call.name, arguments: call.arguments });
             setMessages((m) => {
               const c = [...m];
-              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents] };
+              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents], children: syncChildren() };
               return c;
             });
           }
@@ -253,9 +330,24 @@ export function useChat(opts: ChatRouteOpts = {}) {
             toolEvents.push({ kind: 'result', name: result.name, ok: result.ok, content: result.content });
             setMessages((m) => {
               const c = [...m];
-              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents] };
+              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents], children: syncChildren() };
               return c;
             });
+          }
+          const child = ev.child_agent as ChildSpan | undefined;
+          if (child?.span_id) {
+            childMap.set(child.span_id, {
+              ...childMap.get(child.span_id),
+              ...child,
+              summary: child.summary || childMap.get(child.span_id)?.summary || '',
+            });
+            const kids = syncChildren();
+            setMessages((m) => {
+              const c = [...m];
+              c[c.length - 1] = { ...c[c.length - 1], children: kids, tools: [...toolEvents] };
+              return c;
+            });
+            patchSessionSpans(sid || activeId, kids);
           }
         },
       });
@@ -273,7 +365,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
           acc = '';
           setMessages((m) => {
             const c = [...m];
-            c[c.length - 1] = { ...c[c.length - 1], content: '', tools: [] };
+            c[c.length - 1] = { ...c[c.length - 1], content: '', tools: [], children: [] };
             return c;
           });
           res = await attempt(null);
@@ -283,7 +375,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
       }
       setMessages((m) => {
         const c = [...m];
-        c[c.length - 1] = { ...c[c.length - 1], content: acc, gate: res.gate, tools: [...toolEvents] };
+        c[c.length - 1] = {
+          ...c[c.length - 1],
+          content: acc,
+          gate: res.gate,
+          tools: [...toolEvents],
+          children: syncChildren(),
+        };
         return c;
       });
       const finalStats = res.gate?.agent?.llm_stats;
@@ -327,7 +425,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       abortRef.current = null;
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [input, activeId, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
+  }, [input, activeId, agentView, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -392,6 +490,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       setError(null);
       const { id } = await api.createSession();
       await loadSessions();
+      setAgentView(null);
       setActiveId(id);
       setMessages([]);
       setCost(null);
@@ -515,6 +614,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
     llmStats,
+    agentView,
+    parentId: agentView?.parentId ?? null,
+    activeSpanId: agentView?.spanId ?? null,
+    selectSession, selectSpan, backToParent,
     loadSessions, loadLeaf, send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention,
   };

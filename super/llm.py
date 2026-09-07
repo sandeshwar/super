@@ -135,17 +135,30 @@ def ask(cfg: dict, prompt: str, system: str | None = None) -> str:
     return chat(cfg, messages)
 
 
-def chat_stream(cfg: dict, messages: list[dict]):
-    """Yield SSE-shaped dicts: {delta} during generation, final {usage} from provider."""
+def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None):
+    """Yield stream events from /api/chat.
+
+    Yields:
+      {"delta": str}          — content token/chunk
+      {"tool_calls": list}    — full tool_calls when present (usually on final frame)
+      {"usage": dict}         — provider timing when done
+      {"message": dict}       — assembled assistant message at end (content + tool_calls)
+    """
     llm = cfg["llm"]
     timeout = float(llm.get("timeout_s", 120))
     url = llm["endpoint"].rstrip("/") + "/api/chat"
-    payload = json.dumps({"model": llm["model"], "messages": messages, "stream": True}).encode()
+    payload_obj: dict = {"model": llm["model"], "messages": messages, "stream": True}
+    if tools:
+        payload_obj["tools"] = tools
+    payload = json.dumps(payload_obj).encode()
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         resp = urllib.request.urlopen(req, timeout=timeout)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         raise LLMError(f"model stream unreachable: {e}") from e
+
+    content_parts: list[str] = []
+    tool_calls: list = []
     with resp:
         for raw in resp:
             line = raw.decode().strip() if isinstance(raw, bytes) else str(raw).strip()
@@ -157,14 +170,37 @@ def chat_stream(cfg: dict, messages: list[dict]):
                 continue
             if not isinstance(obj, dict):
                 continue
-            delta = (obj.get("message") or {}).get("content", "")
+            msg = obj.get("message") or {}
+            if not isinstance(msg, dict):
+                msg = {}
+            delta = msg.get("content") or ""
             if delta:
+                content_parts.append(delta)
                 yield {"delta": delta}
+            tcs = msg.get("tool_calls")
+            if isinstance(tcs, list) and tcs:
+                tool_calls = tcs
             if obj.get("done"):
+                if tool_calls:
+                    yield {"tool_calls": tool_calls}
                 usage = extract_usage(obj)
                 if usage:
                     yield {"usage": usage}
+                assembled = {
+                    "role": "assistant",
+                    "content": "".join(content_parts),
+                }
+                if tool_calls:
+                    assembled["tool_calls"] = tool_calls
+                yield {"message": assembled}
                 break
+
+
+def chat_stream_text(cfg: dict, messages: list[dict]):
+    """Back-compat: yield only {delta}/{usage} (no tools)."""
+    for ev in chat_stream(cfg, messages, tools=None):
+        if "delta" in ev or "usage" in ev:
+            yield ev
 
 
 def list_models(cfg: dict, timeout: float = 8.0) -> list[str]:

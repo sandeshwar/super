@@ -90,6 +90,7 @@ DEFAULTS = {
             "tasks": True,
             "memory": True,
             "project": True,
+            "agents": True,
         },
         "disabled": [],
         "packs": {
@@ -109,12 +110,18 @@ DEFAULTS = {
         "builtin_config": {},
         "runtime": "auto",
     },
+    "agents": {
+        "enabled": True,
+        "max_depth": 3,
+        "max_agents": 50,
+        "allow_agent_create_roles": ["worker", "planner"],
+    },
     "server": {"host": "127.0.0.1", "port": 4311, "token": ""},
     "state_dir": ".super",
 }
 
 # Keys exposed via GET/POST /api/config (never includes server.token).
-PUBLIC_SECTIONS = ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools")
+PUBLIC_SECTIONS = ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools", "agents")
 
 _BOOL_KEYS = {
     ("gates", k) for k in DEFAULTS["gates"]
@@ -225,6 +232,20 @@ def _validate(cfg: dict) -> None:
                         raise ConfigError(f"tools.{ck}.{name} must be an object")
         if "runtime" in tools and tools["runtime"] not in ("auto", "stdlib", "langgraph"):
             raise ConfigError("tools.runtime must be auto, stdlib, or langgraph")
+        agents = cfg.get("agents") or {}
+        if not isinstance(agents, dict):
+            raise ConfigError("agents must be an object")
+        if "enabled" in agents and not isinstance(agents["enabled"], bool):
+            raise ConfigError("agents.enabled must be boolean")
+        for ik in ("max_depth", "max_agents"):
+            if ik in agents:
+                v = agents[ik]
+                if not isinstance(v, int) or v < 1 or v > 200:
+                    raise ConfigError(f"agents.{ik} must be an int in [1, 200]")
+        if "allow_agent_create_roles" in agents:
+            roles = agents["allow_agent_create_roles"]
+            if not isinstance(roles, list) or not all(isinstance(x, str) for x in roles):
+                raise ConfigError("agents.allow_agent_create_roles must be a list of strings")
     except KeyError as e:
         raise ConfigError(f"missing required config key: {e}") from e
 

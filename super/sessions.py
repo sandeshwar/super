@@ -34,13 +34,31 @@ def _save(cfg: dict, data: dict) -> None:
     store.save_json(_path(cfg), data)
 
 
-def create(cfg: dict, title: str = "New chat") -> str:
+def create(
+    cfg: dict,
+    title: str = "New chat",
+    *,
+    parent: str | None = None,
+    span_id: str | None = None,
+    agent_id: str | None = None,
+    kind: str = "chat",
+) -> str:
     title = (title or "New chat").strip()[:120] or "New chat"
     sid = uuid.uuid4().hex[:12]
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     data = _load(cfg)
-    data["sessions"][sid] = {"id": sid, "title": title, "created": now,
-                             "updated": now, "messages": []}
+    row: dict = {
+        "id": sid, "title": title, "created": now,
+        "updated": now, "messages": [], "kind": kind or "chat",
+    }
+    if parent:
+        row["parent"] = str(parent)
+        row["kind"] = kind or "agent"
+    if span_id:
+        row["span_id"] = str(span_id)
+    if agent_id:
+        row["agent_id"] = str(agent_id)
+    data["sessions"][sid] = row
     _save(cfg, data)
     return sid
 
@@ -50,9 +68,22 @@ def get(cfg: dict, sid: str) -> dict | None:
 
 
 def list_all(cfg: dict) -> list:
+    """Top-level chats only (agent child sessions nest under parent.spans)."""
+    from . import agents as _agents
     data = _load(cfg)
-    out = [{"id": s["id"], "title": s["title"], "updated": s["updated"],
-            "n": len(s["messages"])} for s in data["sessions"].values()]
+    by_sid = _agents.spans_by_session(cfg)
+    out = []
+    for s in data["sessions"].values():
+        if s.get("parent"):
+            continue  # child agent transcripts — opened via span click
+        out.append({
+            "id": s["id"],
+            "title": s["title"],
+            "updated": s["updated"],
+            "n": len(s["messages"]),
+            "kind": s.get("kind") or "chat",
+            "spans": by_sid.get(s["id"], []),
+        })
     out.sort(key=lambda s: s["updated"], reverse=True)
     return out
 
@@ -64,6 +95,7 @@ def append(
     content: str,
     gate: dict | None = None,
     tools: list | None = None,
+    children: list | None = None,
 ) -> dict:
     if role not in ("user", "assistant", "system"):
         raise StoreError(f"invalid role {role}")
@@ -100,6 +132,24 @@ def append(
             clean.append(row)
         if clean:
             msg["tools"] = clean
+    if children:
+        clean_c = []
+        for c in children[:20]:
+            if not isinstance(c, dict) or not c.get("span_id"):
+                continue
+            clean_c.append({
+                "span_id": str(c.get("span_id"))[:24],
+                "agent_id": str(c.get("agent_id") or "")[:40],
+                "agent_name": str(c.get("agent_name") or "")[:80],
+                "role": str(c.get("role") or "")[:32],
+                "status": str(c.get("status") or "done")[:16],
+                "summary": str(c.get("summary") or "")[:160],
+                "goal": str(c.get("goal") or "")[:200],
+                "steps": c.get("steps"),
+                "child_session_id": str(c.get("child_session_id") or "")[:24] or None,
+            })
+        if clean_c:
+            msg["children"] = clean_c
     s["messages"].append(msg)
     s["updated"] = msg["ts"]
     if len(s["messages"]) == 1 and role == "user" and s["title"] == "New chat":
@@ -119,9 +169,103 @@ def delete(cfg: dict, sid: str) -> bool:
     data = _load(cfg)
     if sid not in data["sessions"]:
         return False
-    del data["sessions"][sid]
+    # Cascade: remove nested agent child sessions
+    drop = [sid] + [
+        k for k, v in data["sessions"].items()
+        if isinstance(v, dict) and v.get("parent") == sid
+    ]
+    for k in drop:
+        data["sessions"].pop(k, None)
     _save(cfg, data)
     return True
+
+
+def write_agent_transcript(
+    cfg: dict,
+    sid: str,
+    llm_messages: list,
+    *,
+    gate: dict | None = None,
+    tool_events: list | None = None,
+) -> dict:
+    """Replace a child agent session with a UI transcript from the ReAct run."""
+    data = _load(cfg)
+    s = data["sessions"].get(sid)
+    if not s:
+        raise KeyError(f"no session {sid}")
+    ui: list[dict] = []
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    i = 0
+    msgs = [m for m in (llm_messages or []) if isinstance(m, dict)]
+    while i < len(msgs):
+        m = msgs[i]
+        role = m.get("role")
+        if role == "system":
+            i += 1
+            continue
+        if role == "user":
+            content = str(m.get("content") or "")[:MAX_MESSAGE_CHARS]
+            if content.strip():
+                ui.append({"role": "user", "content": content, "ts": now})
+            i += 1
+            continue
+        if role == "assistant":
+            content = str(m.get("content") or "")
+            tools_ui: list[dict] = []
+            raw_tcs = m.get("tool_calls") or []
+            call_meta: list[tuple[str, str, object]] = []
+            if isinstance(raw_tcs, list):
+                for tc in raw_tcs:
+                    if not isinstance(tc, dict):
+                        continue
+                    fn = tc.get("function") or {}
+                    name = str(fn.get("name") or tc.get("name") or "")
+                    tid = str(tc.get("id") or "")
+                    args = fn.get("arguments", tc.get("arguments"))
+                    if name:
+                        call_meta.append((tid, name, args))
+                        tools_ui.append({"kind": "call", "name": name, "arguments": args})
+            i += 1
+            # Consume following tool role messages as results
+            results_left = list(call_meta)
+            while i < len(msgs) and msgs[i].get("role") == "tool":
+                tr = msgs[i]
+                name = str(tr.get("name") or (results_left[0][1] if results_left else "tool"))
+                if results_left:
+                    results_left.pop(0)
+                body = str(tr.get("content") or "")[:2000]
+                tools_ui.append({"kind": "result", "name": name, "ok": True, "content": body})
+                i += 1
+            row: dict = {
+                "role": "assistant",
+                "content": content[:MAX_MESSAGE_CHARS],
+                "ts": now,
+            }
+            if tools_ui:
+                row["tools"] = tools_ui
+            # Attach gate only on the final text-only assistant turn
+            if gate is not None and not call_meta:
+                row["gate"] = gate
+                gate = None  # only once
+            ui.append(row)
+            continue
+        i += 1
+    # If we have leftover tool_events and no tools on messages, attach to last assistant
+    if tool_events and ui:
+        last = ui[-1]
+        if last.get("role") == "assistant" and not last.get("tools"):
+            clean = []
+            for t in tool_events[:40]:
+                if isinstance(t, dict) and t.get("name"):
+                    clean.append(t)
+            if clean:
+                last["tools"] = clean
+    if gate is not None and ui and ui[-1].get("role") == "assistant" and "gate" not in ui[-1]:
+        ui[-1]["gate"] = gate
+    s["messages"] = ui
+    s["updated"] = now
+    _save(cfg, data)
+    return s
 
 
 def rename(cfg: dict, sid: str, title: str) -> dict:

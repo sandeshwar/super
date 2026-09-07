@@ -44,6 +44,10 @@ GROUPS: dict[str, dict[str, str]] = {
         "title": "Project",
         "blurb": "Tree overview and public config",
     },
+    "agents": {
+        "title": "Agents",
+        "blurb": "Create and run specialized sub-agents (inherit parent rules)",
+    },
 }
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -260,6 +264,104 @@ _reg(ToolSpec("repo_tree", "project", "Show folder tree",
 _reg(ToolSpec("read_config", "project", "Read public config",
               "Return the public (non-secret) config, or one section.",
               _props(section=_str("Optional section name")), B.read_config_tool))
+
+# ── agents (specialized sub-agents) ───────────────────────────────────
+def _list_agents_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_list_agents(cfg, args)
+
+def _get_agent_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_get_agent(cfg, args)
+
+def _create_agent_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_create_agent(cfg, args)
+
+def _update_agent_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_update_agent(cfg, args)
+
+def _archive_agent_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_archive_agent(cfg, args)
+
+def _run_agent_handler(cfg: dict, args: dict):
+    from .. import agents as A
+    return A.handle_run_agent(cfg, args)
+
+_reg(ToolSpec(
+    "list_agents", "agents", "List specialized agents",
+    "List AgentSpecs (id, name, role, status). Children inherit parent tool/gate budgets.",
+    _props(include_archived=_bool("Include archived")),
+    _list_agents_handler,
+    discovery=True,
+    keywords="subagent multi-agent specialist",
+))
+_reg(ToolSpec(
+    "get_agent", "agents", "Get agent details",
+    "Fetch one AgentSpec and the effective rights if spawned under the current agent.",
+    _props(id=_str("Agent id", req=True)),
+    _get_agent_handler,
+    discovery=True,
+))
+_reg(ToolSpec(
+    "create_agent", "agents", "Create a specialized agent",
+    "Create an AgentSpec. Workers/planners activate immediately; judge roles "
+    "(reviewer/auditor/evaluator/integrator) stay pending until human approval. "
+    "Tools/groups can only tighten relative to you (the parent).",
+    _props(
+        name=_str("Short name", req=True),
+        role=_str("worker|planner|reviewer|auditor|evaluator|integrator", **{"default": "worker"}),
+        summary=_str("What this agent is for"),
+        system_addon=_str("Extra instructions for this specialist"),
+        tools={"type": "array", "items": {"type": "string"}, "description": "Optional tool-name allowlist"},
+        groups={"type": "array", "items": {"type": "string"}, "description": "Optional group allowlist"},
+        disabled={"type": "array", "items": {"type": "string"}, "description": "Extra disabled tool names"},
+        inherits_from=_str("Optional parent AgentSpec id to inherit from"),
+    ),
+    _create_agent_handler,
+    risk="medium",
+    discovery=True,
+    keywords="spawn create subagent specialist",
+))
+_reg(ToolSpec(
+    "update_agent", "agents", "Update an agent",
+    "Update fields on an AgentSpec. Agents may only tighten policy flags.",
+    _props(
+        id=_str("Agent id", req=True),
+        name=_str("New name"),
+        summary=_str("New summary"),
+        system_addon=_str("New specialization prompt"),
+        tools={"type": "array", "items": {"type": "string"}, "description": "Tool allowlist"},
+        groups={"type": "array", "items": {"type": "string"}, "description": "Group allowlist"},
+        disabled={"type": "array", "items": {"type": "string"}, "description": "Disabled tools"},
+    ),
+    _update_agent_handler,
+    risk="medium",
+    discovery=True,
+))
+_reg(ToolSpec(
+    "archive_agent", "agents", "Archive an agent",
+    "Archive an AgentSpec (keeps history; cannot be run).",
+    _props(id=_str("Agent id", req=True)),
+    _archive_agent_handler,
+    risk="medium",
+    discovery=True,
+))
+_reg(ToolSpec(
+    "run_agent", "agents", "Run a specialized agent",
+    "Spawn an active AgentSpec as a child span. It inherits your gates, security, "
+    "tool ceiling, and budgets (can only be narrower). Returns its reply + span ids.",
+    _props(
+        id=_str("Agent id", req=True),
+        goal=_str("Goal / prompt for the child agent", req=True),
+    ),
+    _run_agent_handler,
+    risk="high",
+    discovery=True,
+    keywords="spawn subagent delegate",
+))
 
 
 def get_tool(name: str) -> ToolSpec | None:

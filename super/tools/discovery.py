@@ -75,6 +75,13 @@ def is_callable(cfg: dict, name: str) -> bool:
     tools_cfg = cfg.get("tools") or {}
     if not tools_cfg.get("enabled", True):
         return False
+    try:
+        from .. import agents as _agents
+        ok, _ = _agents.can_call_tool(cfg, name)
+        if not ok:
+            return False
+    except Exception:
+        pass
     if tools_cfg.get("discovery", True):
         if spec.discovery:
             return True

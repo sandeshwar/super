@@ -38,7 +38,7 @@ export function Sidebar({
       <div className="sidebar-top">
         <div className="brand">
           <div className="brand-mark" aria-hidden>S</div>
-          <div className="brand-wordmark">SUPER<span>Local work helper</span></div>
+          <div className="brand-wordmark">SUPER<span>Generalist assistant</span></div>
           <span className="brand-version">v1.0</span>
         </div>
       </div>

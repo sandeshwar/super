@@ -208,6 +208,30 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/tools":
             from .tools.catalog import catalog_public
             return self._send_json({"tools": catalog_public(CFG)})
+        if u.path == "/api/agents":
+            from . import agents as _agents
+            include = (q.get("include_archived", ["0"])[0] or "0") in ("1", "true", "yes")
+            return self._send_json({"agents": _agents.list_agents(CFG, include_archived=include)})
+        if u.path == "/api/agent":
+            from . import agents as _agents
+            aid = (q.get("id", [""])[0] or "").strip()
+            if not aid:
+                return self._send_json({"error": "missing ?id=", "code": 400}, 400)
+            spec = _agents.get_agent(CFG, aid)
+            if not spec:
+                return self._send_json({"error": "no such agent", "code": 404}, 404)
+            return self._send_json({"agent": spec})
+        if u.path == "/api/spans":
+            from . import agents as _agents
+            sid = (q.get("session_id", [""])[0] or "").strip() or None
+            status = (q.get("status", [""])[0] or "").strip() or None
+            try:
+                lim = int((q.get("limit", ["100"])[0] or "100"))
+            except ValueError:
+                lim = 100
+            return self._send_json({
+                "spans": _agents.list_spans(CFG, session_id=sid, status=status, limit=lim),
+            })
         if u.path == "/api/diff":
             # Review surface: git diff for task files. Empty paths → no whole-repo dump.
             paths = [p for p in (q.get("path", []) or []) if str(p).strip()]
@@ -407,6 +431,56 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": True, "spec": s})
                 except Exception as e:
                     return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/agents":
+                from . import agents as _agents
+                from .errors import StoreError as _SE
+                try:
+                    spec = _agents.create_agent(
+                        CFG,
+                        name=str(body.get("name") or ""),
+                        role=str(body.get("role") or "worker"),
+                        summary=str(body.get("summary") or ""),
+                        system_addon=str(body.get("system_addon") or ""),
+                        tools=body.get("tools"),
+                        groups=body.get("groups"),
+                        disabled=body.get("disabled"),
+                        inherits_from=(str(body["inherits_from"]) if body.get("inherits_from") else None),
+                        budgets=body.get("budgets") if isinstance(body.get("budgets"), dict) else None,
+                        policy=body.get("policy") if isinstance(body.get("policy"), dict) else None,
+                        created_by="user",
+                        force_active=True,
+                    )
+                    return self._send_json({"ok": True, "agent": spec})
+                except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/agent":
+                from . import agents as _agents
+                from .errors import StoreError as _SE
+                aid = str(body.get("id") or "").strip()
+                if not aid:
+                    return self._send_json({"error": "id required", "code": 400}, 400)
+                action = str(body.get("action") or "update").strip()
+                try:
+                    if action == "approve":
+                        spec = _agents.approve_agent(CFG, aid, actor="user")
+                    elif action == "archive":
+                        spec = _agents.archive_agent(CFG, aid, actor="user")
+                    elif action == "run":
+                        goal = str(body.get("goal") or "").strip()
+                        if not goal:
+                            return self._send_json({"error": "goal required", "code": 400}, 400)
+                        result = _agents.run_specialized(CFG, aid, goal)
+                        return self._send_json({"ok": True, **{k: result[k] for k in (
+                            "reply", "span_id", "run_id", "effective", "gate", "meta", "agent"
+                        ) if k in result}})
+                    else:
+                        patch = {k: v for k, v in body.items() if k not in ("id", "action")}
+                        spec = _agents.update_agent(CFG, aid, patch, actor="user")
+                    return self._send_json({"ok": True, "agent": spec})
+                except KeyError:
+                    return self._send_json({"error": "no such agent", "code": 404}, 404)
+                except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
             if self.path.split("?")[0] == "/api/sessions":
                 sid = sessions.create(CFG, str(body.get("title", "New chat"))[:120])
                 return self._send_json({"id": sid})
@@ -601,9 +675,18 @@ class Handler(BaseHTTPRequestHandler):
                     reply = ""
                     agent_meta: dict = {}
                     tool_events: list[dict] = []
+                    child_by_span: dict[str, dict] = {}
                     if tools_on:
                         from .tools.runtime import run_agent_stream
-                        for ev in run_agent_stream(CFG, messages):
+                        import uuid as _uuid
+                        run_cfg = dict(CFG)
+                        run_cfg["_session_id"] = sid
+                        run_cfg["_agent"] = {
+                            **(CFG.get("_agent") or {}),
+                            "id": "main",
+                            "run_id": _uuid.uuid4().hex[:12],
+                        }
+                        for ev in run_agent_stream(run_cfg, messages):
                             if "delta" in ev:
                                 reply += ev["delta"]
                             if "agent_meta" in ev:
@@ -624,6 +707,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "ok": tr.get("ok"),
                                     "content": tr.get("content"),
                                 })
+                            ca = ev.get("child_agent")
+                            if isinstance(ca, dict) and ca.get("span_id"):
+                                child_by_span[str(ca["span_id"])] = ca
                             self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
                             self.wfile.flush()
                     else:
@@ -662,7 +748,11 @@ class Handler(BaseHTTPRequestHandler):
                     gate = harness.check_reply(CFG, reply)
                     if agent_meta:
                         gate = {**gate, "agent": agent_meta}
-                    sessions.append(CFG, sid, "assistant", reply, gate=gate, tools=tool_events or None)
+                    children = list(child_by_span.values()) or None
+                    sessions.append(
+                        CFG, sid, "assistant", reply,
+                        gate=gate, tools=tool_events or None, children=children,
+                    )
                     self.wfile.write(
                         f"data: {json.dumps({'done': True, 'session_id': sid, 'gate': gate})}\n\n".encode())
                 except (BrokenPipeError, ConnectionResetError):
@@ -698,6 +788,19 @@ class Handler(BaseHTTPRequestHandler):
             if sessions.delete(CFG, sid):
                 return self._send_json({"ok": True})
             return self._send_json({"error": "no such session", "code": 404}, 404)
+        if u.path.split("?")[0] == "/api/agent":
+            from . import agents as _agents
+            from .errors import StoreError as _SE
+            aid = (q.get("id", [""])[0] or "").strip()
+            if not aid:
+                return self._send_json({"error": "missing ?id=", "code": 400}, 400)
+            try:
+                spec = _agents.archive_agent(CFG, aid, actor="user")
+                return self._send_json({"ok": True, "agent": spec})
+            except KeyError:
+                return self._send_json({"error": "no such agent", "code": 404}, 404)
+            except _SE as e:
+                return self._send_json({"error": str(e), "code": 400}, 400)
         return self._send_json({"error": "not found", "code": 404}, 404)
 
     def log_message(self, *a) -> None:
@@ -747,5 +850,5 @@ def serve(cfg: dict) -> None:
     _watch_config()
     httpd = ThreadingHTTPServer((host, port), Handler)
     print(f"SUPER { '1.0.0'} dashboard on http://{host}:{port}/?token={token}")
-    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics")
+    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans")
     httpd.serve_forever()

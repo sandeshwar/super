@@ -44,13 +44,18 @@ def build_system(cfg: dict) -> str:
     except Exception:
         mem_txt = "(memory unavailable)"
     return (
-        "You are the coding assistant inside the SUPER harness. "
-        "Rules: only reference files, symbols, and APIs you have evidence for. "
-        "Prefer repo symbols listed below over memory. "
-        "Put code symbols in backticks. If unsure a symbol exists, say so instead of inventing it.\n\n"
-        f"Current task card (your one job):\n{leaf_txt}\n\n"
+        "You are SUPER — a generalist assistant with tools, memory, and specialized sub-agents. "
+        "Help with whatever the user needs: research, writing, planning, ops, coding, or conversation. "
+        "Match their language. Be direct; don't over-tool simple chat.\n\n"
+        "When you claim facts about this workspace (files, symbols, APIs, commands, configs): "
+        "only state what you have evidence for from tools or the context below; "
+        "prefer listed repo symbols over memory; put code symbols in backticks; "
+        "if unsure something exists, say so instead of inventing it.\n\n"
+        "Delegate with create_agent / run_agent when a scoped specialist helps; "
+        "children inherit your tools, gates, and budgets (can only tighten).\n\n"
+        f"Current task card (if any — not every turn is about this):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
-        f"Repo top level: {repo_overview(cfg)}"
+        f"Workspace top level: {repo_overview(cfg)}"
         f"{tools_system_addon(cfg)}"
     )
 
@@ -116,13 +121,29 @@ def answer(cfg: dict, session_id: str, user_text: str) -> tuple[str, dict]:
     tools_on = bool((cfg.get("tools") or {}).get("enabled", True))
     if tools_on:
         from .tools.runtime import run_agent
-        reply, _, meta = run_agent(cfg, messages)
+        import uuid as _uuid
+        run_cfg = cfg
+        # Tag session so spawned specialists appear under this chat.
+        if not cfg.get("_session_id"):
+            run_cfg = {**cfg, "_session_id": session_id}
+            run_cfg["_agent"] = {**(cfg.get("_agent") or {}), "id": "main", "run_id": _uuid.uuid4().hex[:12]}
+        reply, _, meta = run_agent(run_cfg, messages)
         gate = check_reply(cfg, reply)
         if isinstance(gate, dict):
             gate = {**gate, "agent": {k: v for k, v in meta.items() if k != "events"}}
         # Persist UI tool trace (same shape as /api/chat/stream)
         events = meta.get("events") if isinstance(meta, dict) else None
-        sessions.append(cfg, session_id, "assistant", reply, gate=gate, tools=events or None)
+        children = None
+        try:
+            from . import agents as _agents
+            children = _agents.list_spans(cfg, session_id=session_id, limit=12)
+            # Only attach spans touched this turn if we can filter by run_id
+            rid = (run_cfg.get("_agent") or {}).get("run_id")
+            if rid and children:
+                children = [c for c in children if c.get("run_id") == rid] or children[:4]
+        except Exception:
+            children = None
+        sessions.append(cfg, session_id, "assistant", reply, gate=gate, tools=events or None, children=children)
         return reply, gate
 
     n = max(1, int(cfg.get("envelope", {}).get("best_of_n", 1)))

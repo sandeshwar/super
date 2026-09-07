@@ -35,7 +35,7 @@ export function AppHeader({
   const modelLabel = model ? modelShort(model) : 'offline';
   const isOffline = !model;
   const sub =
-    view === 'chat' ? 'checked against your code' :
+    view === 'chat' ? 'generalist · tools · specialists' :
     view === 'tree' ? `${stats.total} tasks` :
     view === 'approve' ? `${stats.pending} to review` :
     view === 'settings' ? 'model · look · tools' :

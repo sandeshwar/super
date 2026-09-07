@@ -13,6 +13,7 @@ export type SettingsSection =
   | 'model'
   | 'appearance'
   | 'tools'
+  | 'agents'
   | 'mcp'
   | 'workspace'
   | 'safety'
@@ -22,6 +23,7 @@ const SECTIONS: { id: SettingsSection; title: string; blurb: string }[] = [
   { id: 'model', title: 'Model', blurb: 'Which model answers, and how to reach it' },
   { id: 'appearance', title: 'Appearance', blurb: 'Theme, density, motion' },
   { id: 'tools', title: 'Tools', blurb: 'Agent tools, checks, and chat helpers' },
+  { id: 'agents', title: 'Agents', blurb: 'Specialized sub-agents (CRUD + inherit parent rules)' },
   { id: 'mcp', title: 'MCP servers', blurb: 'Connect external tool servers' },
   { id: 'workspace', title: 'Folder', blurb: 'Project path and config file' },
   { id: 'safety', title: 'Safety', blurb: 'Secret scans and package checks' },
@@ -289,6 +291,10 @@ export default function SettingsView({
           />
         )}
 
+        {section === 'agents' && (
+          <AgentsSection onFlash={setFlash} onError={setError} />
+        )}
+
         {section === 'mcp' && cfg && (
           <McpSection
             servers={cfg.mcp?.servers || []}
@@ -497,6 +503,136 @@ function AppearanceSection({ appearance }: { appearance: ReturnType<typeof useAp
             label="Reduce motion"
             description="Turn off non-essential animations"
           />
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
+function AgentsSection({
+  onFlash, onError,
+}: {
+  onFlash: (s: string | null) => void;
+  onError: (s: string | null) => void;
+}) {
+  const [agents, setAgents] = useState<import('../api').AgentSpec[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState('');
+  const [role, setRole] = useState('worker');
+  const [summary, setSummary] = useState('');
+  const [groups, setGroups] = useState('files,search');
+  const [addon, setAddon] = useState('');
+
+  const reload = useCallback(async () => {
+    try {
+      const r = await api.listAgents(true);
+      setAgents(r.agents || []);
+      onError(null);
+    } catch (e) {
+      onError(userMessage(e));
+    }
+  }, [onError]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  const create = async () => {
+    setBusy(true);
+    try {
+      const g = groups.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+      await api.createAgent({
+        name,
+        role,
+        summary,
+        system_addon: addon,
+        groups: g.length ? g : null,
+      });
+      setName('');
+      setSummary('');
+      setAddon('');
+      onFlash('Agent created');
+      setTimeout(() => onFlash(null), 1600);
+      await reload();
+    } catch (e) {
+      onError(userMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-stack">
+      <Card>
+        <CardHead>New agent</CardHead>
+        <CardBody>
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Specs are CRUD resources. Children inherit parent tools/gates/budgets (can only tighten).
+            Judge roles created by the main agent stay pending until you approve them here.
+          </p>
+          <div style={{ display: 'grid', gap: 'var(--space-2)', maxWidth: 520 }}>
+            <label>
+              Name
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="repo-reader" />
+            </label>
+            <label>
+              Role
+              <Select value={role} onChange={(e) => setRole(e.target.value)}>
+                {['worker', 'planner', 'reviewer', 'auditor', 'evaluator', 'integrator'].map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </Select>
+            </label>
+            <label>
+              Summary
+              <Input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="What it specializes in" />
+            </label>
+            <label>
+              Groups (comma)
+              <Input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="files,search" />
+            </label>
+            <label>
+              System addon
+              <Input value={addon} onChange={(e) => setAddon(e.target.value)} placeholder="Extra instructions" />
+            </label>
+            <Button disabled={busy || !name.trim()} onClick={() => void create()}>Create</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHead>Registry ({agents.filter((a) => a.status !== 'archived').length} active)</CardHead>
+        <CardBody>
+          {agents.length === 0 && <p className="small muted">No agents yet — create one or let the main agent use create_agent.</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+            {agents.map((a) => (
+              <div
+                key={a.id}
+                style={{
+                  display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start',
+                  padding: 'var(--space-2)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
+                  opacity: a.status === 'archived' ? 0.55 : 1,
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{a.name} <span className="mono muted" style={{ fontWeight: 400 }}>{a.role}</span></div>
+                  <div className="small muted mono">{a.id} · {a.status} · {a.created_by || '—'}</div>
+                  {a.summary && <div className="small" style={{ marginTop: 4 }}>{a.summary}</div>}
+                  {a.groups && <div className="mono small muted">groups: {(a.groups || []).join(', ') || '—'}</div>}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                  {a.status === 'pending' && (
+                    <Button size="sm" onClick={() => void api.approveAgent(a.id).then(reload).catch((e) => onError(userMessage(e)))}>
+                      Approve
+                    </Button>
+                  )}
+                  {a.status !== 'archived' && (
+                    <Button size="sm" variant="ghost" onClick={() => void api.archiveAgent(a.id).then(reload).catch((e) => onError(userMessage(e)))}>
+                      Archive
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </CardBody>
       </Card>
     </div>

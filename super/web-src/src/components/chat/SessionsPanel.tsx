@@ -1,4 +1,4 @@
-import type { SessionSummary } from '../../types';
+import type { ChildSpan, SessionSummary } from '../../types';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card } from '../ui/Card';
@@ -8,6 +8,9 @@ type Props = {
   sessions: SessionSummary[];
   filtered: SessionSummary[];
   activeId: string | null;
+  /** Parent session id when viewing a nested agent transcript. */
+  parentId?: string | null;
+  activeSpanId?: string | null;
   filter: string;
   busy?: boolean;
   selectMode: boolean;
@@ -15,6 +18,7 @@ type Props = {
   onFilter: (v: string) => void;
   onNewChat: () => void;
   onSelect: (id: string) => void;
+  onSelectSpan?: (parentId: string, span: ChildSpan) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string | null) => void;
   onToggleSelectMode: () => void;
@@ -25,9 +29,9 @@ type Props = {
 };
 
 export function SessionsPanel({
-  sessions, filtered, activeId, filter, busy,
+  sessions, filtered, activeId, parentId, activeSpanId, filter, busy,
   selectMode, selectedIds,
-  onFilter, onNewChat, onSelect, onDelete, onRename,
+  onFilter, onNewChat, onSelect, onSelectSpan, onDelete, onRename,
   onToggleSelectMode, onToggleSelected, onSelectAllFiltered, onClearSelection, onDeleteSelected,
 }: Props) {
   const nSel = selectedIds.size;
@@ -70,19 +74,25 @@ export function SessionsPanel({
       </div>
 
       <div className="sessions-panel-list" role="list" aria-label="Chat list">
-        {filtered.map((s) => (
-          <SessionRow
-            key={s.id}
-            s={s}
-            active={s.id === activeId}
-            selectMode={selectMode}
-            selected={selectedIds.has(s.id)}
-            onSelect={() => onSelect(s.id)}
-            onToggleSelect={() => onToggleSelected(s.id)}
-            onDelete={() => onDelete(s.id)}
-            onRename={(t) => onRename(s.id, t)}
-          />
-        ))}
+        {filtered.map((s) => {
+          const spanOpen = parentId === s.id;
+          return (
+            <SessionRow
+              key={s.id}
+              s={s}
+              active={s.id === activeId}
+              childActive={spanOpen}
+              activeSpanId={spanOpen ? activeSpanId : null}
+              selectMode={selectMode}
+              selected={selectedIds.has(s.id)}
+              onSelect={() => onSelect(s.id)}
+              onSelectSpan={(sp) => onSelectSpan?.(s.id, sp)}
+              onToggleSelect={() => onToggleSelected(s.id)}
+              onDelete={() => onDelete(s.id)}
+              onRename={(t) => onRename(s.id, t)}
+            />
+          );
+        })}
         {filtered.length === 0 && (
           <div className="empty" style={{ padding: 'var(--space-4)' }}>
             <div className="empty-icon" aria-hidden><svg viewBox="0 0 16 16" fill="none"><path d="M2.5 3.5a1 1 0 011-1h9a1 1 0 011 1v5.5a1 1 0 01-1 1H6.2l-1.9 1.9a.5.5 0 01-.8-.4V10h-1a1 1 0 01-1-1v-5.5z" stroke="currentColor" strokeWidth="1.2"/></svg></div>

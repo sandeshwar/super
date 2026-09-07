@@ -706,35 +706,71 @@ pre code{padding:0;background:transparent;border:none}
 /* ── Chat session rows — hover highlights row + reveals actions (never clipped) ── */
 .session-row{
   position:relative;
-  display:flex; align-items:center; gap:4px;
+  display:flex; flex-direction:column; align-items:stretch; gap:2px;
   min-width:0; width:100%; overflow:hidden;
   padding:var(--space-1); border-radius:var(--radius-sm);
   background:transparent; border:1px solid transparent;
   transition:background var(--ease), border-color var(--ease);
 }
+.session-row-main{
+  display:flex; align-items:flex-start; gap:4px;
+  min-width:0; width:100%;
+}
 .session-row:hover{background:var(--bg-2); border-color:var(--border-subtle)}
 .session-row.active{background:var(--accent-soft); border-color:var(--accent-border)}
-.session-row-select{min-width:0; overflow:hidden}
-.session-row:hover .session-row-select,
-.session-row:focus-within .session-row-select,
-.session-row.active .session-row-select{padding-right:96px}
-.session-row.editing .session-row-select{padding-right:var(--space-2)}
+.session-row-select{
+  flex:1 1 auto; min-width:0; overflow:hidden;
+  display:flex; flex-direction:column; gap:2px;
+  padding:var(--space-1) var(--space-2);
+  border-radius:var(--radius-xs); cursor:pointer; text-align:left;
+  background:transparent; border:none; color:inherit;
+}
+.session-row-title{
+  display:flex; align-items:center; gap:var(--space-2);
+  min-width:0; max-width:100%;
+}
+.session-row-id{
+  flex-shrink:0; font-size:var(--text-2xs); padding:2px 6px;
+  border-radius:var(--radius-xs); background:var(--bg-3); color:var(--fg-3);
+  border:1px solid var(--border);
+}
+.session-row.active .session-row-id{
+  background:var(--accent); color:var(--accent-fg); border-color:var(--accent);
+}
+.session-row-name{
+  font-weight:500; font-size:var(--text-base);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  flex:1 1 auto; min-width:0; color:var(--fg-1);
+}
+.session-row.active .session-row-name{font-weight:600; color:var(--fg-0)}
+.session-row-rename{
+  flex:1; font-size:var(--text-base); padding:2px 6px;
+  border-radius:var(--radius-xs); border:1px solid var(--accent-border);
+  background:var(--bg-1); color:var(--fg-0);
+}
+.session-row-meta{
+  display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+  min-width:0; font-size:var(--text-2xs); color:var(--fg-3); line-height:1.35;
+}
+.session-row.active .session-row-meta{color:var(--accent)}
+.session-row-meta-sep{
+  width:3px; height:3px; border-radius:99px; background:var(--fg-4); flex-shrink:0;
+}
+.session-row-meta-live{color:var(--yellow)}
 .session-row-actions{
-  position:absolute; right:6px; top:50%;
   display:flex; flex-direction:row; gap:2px; flex-shrink:0;
+  margin-top:2px; margin-right:2px;
   background:var(--bg-2); border:1px solid var(--border-subtle); border-radius:var(--radius-sm);
-  padding:2px; box-shadow:var(--shadow-sm); z-index:1;
+  padding:2px; box-shadow:var(--shadow-sm);
   opacity:0; visibility:hidden; pointer-events:none;
-  transform:translateY(-50%) translateX(2px);
-  transition:opacity var(--ease), transform var(--ease), visibility var(--ease);
+  transition:opacity var(--ease), visibility var(--ease);
 }
-.session-row.active .session-row-actions{background:var(--bg-1)}
+.session-row.active .session-row-actions,
+.session-row.has-active-span .session-row-actions{background:var(--bg-1)}
 .session-row:hover .session-row-actions,
-.session-row:focus-within .session-row-actions,
 .session-row-actions:focus-within{
-  opacity:1; visibility:visible; pointer-events:auto; transform:translateY(-50%);
+  opacity:1; visibility:visible; pointer-events:auto;
 }
-.session-row.active .session-row-actions{opacity:1; visibility:visible; pointer-events:auto; transform:translateY(-50%)}
 .session-row.editing .session-row-actions{display:none}
 .session-row-btn{
   width:26px; height:26px; display:grid; place-items:center;
@@ -745,7 +781,76 @@ pre code{padding:0;background:transparent;border:none}
 .session-row-delete{width:28px; height:28px}
 .session-row-delete:hover{background:var(--red-bg); border-color:var(--red-border); color:var(--red)}
 @media (hover:none){
-  .session-row-actions{opacity:1; visibility:visible; transform:none; pointer-events:auto}
+  .session-row-actions{opacity:1; visibility:visible; pointer-events:auto}
+}
+
+.session-span-list{
+  list-style:none; margin:0 0 2px; padding:0 4px 2px 16px;
+  display:flex; flex-direction:column; gap:3px;
+  border-left:1px solid var(--border-subtle);
+  margin-left:12px;
+}
+.session-span-item{
+  display:flex; align-items:center; gap:6px; min-width:0; width:100%;
+  font-size:var(--text-2xs); color:var(--fg-3); line-height:1.35;
+  padding:3px 6px; margin:0; border:1px solid transparent; border-radius:var(--radius-xs);
+  background:transparent; text-align:left; cursor:pointer;
+  font: inherit;
+}
+.session-span-item:hover{background:var(--bg-3); color:var(--fg-1); border-color:var(--border-subtle)}
+.session-span-item.active{
+  background:var(--accent-soft); border-color:var(--accent-border); color:var(--fg-0);
+}
+.session-span-item:disabled{cursor:default; opacity:0.7}
+.session-span-item.running{color:var(--fg-1)}
+.session-span-dot{
+  width:6px; height:6px; border-radius:99px; flex-shrink:0; background:var(--fg-4);
+}
+.session-span-dot.running{background:var(--yellow); box-shadow:0 0 0 2px color-mix(in srgb, var(--yellow) 25%, transparent)}
+.session-span-dot.done{background:var(--green)}
+.session-span-dot.error{background:var(--red)}
+.session-span-summary{
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.session-row.has-active-span{border-color:var(--accent-border)}
+.session-span-badge.live{
+  flex-shrink:0; font-size:9px; letter-spacing:0.04em; text-transform:uppercase;
+  padding:1px 5px; border-radius:99px;
+  background:color-mix(in srgb, var(--yellow) 18%, transparent);
+  border:1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
+  color:var(--yellow);
+}
+
+.child-agent-strip{
+  display:flex; flex-direction:column; gap:4px;
+  margin-bottom:var(--space-2);
+  padding:var(--space-2);
+  background:var(--bg-1);
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-sm);
+}
+.child-agent-line{
+  display:flex; align-items:center; gap:8px; min-width:0;
+  font-size:var(--text-xs); color:var(--fg-2); line-height:1.35;
+}
+.child-agent-dot{
+  width:7px; height:7px; border-radius:99px; flex-shrink:0; background:var(--fg-4);
+}
+.child-agent-dot.status-running{background:var(--yellow); animation:child-pulse 1.2s ease-in-out infinite}
+.child-agent-dot.status-done{background:var(--green)}
+.child-agent-dot.status-error{background:var(--red)}
+.child-agent-role{
+  flex-shrink:0; font-size:var(--text-2xs); color:var(--fg-3);
+  padding:1px 5px; border-radius:var(--radius-xs);
+  background:var(--bg-3); border:1px solid var(--border-subtle);
+}
+.child-agent-summary{
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--fg-1);
+}
+@keyframes child-pulse{
+  0%,100%{opacity:1}
+  50%{opacity:0.45}
 }
 
 /* ── Collapsible — disclosure sections for dense views ── */
@@ -822,9 +927,6 @@ pre code{padding:0;background:transparent;border:none}
 .session-row-check input{width:14px;height:14px;accent-color:var(--accent);cursor:pointer}
 .session-row.select-mode{gap:0}
 .session-row.selected{background:var(--accent-soft);border-color:var(--accent-border)}
-.session-row.select-mode:hover .session-row-select,
-.session-row.select-mode:focus-within .session-row-select,
-.session-row.select-mode.active .session-row-select{padding-right:var(--space-2)}
 
 .panel-foot{
   min-height:32px;padding:0 var(--space-3);

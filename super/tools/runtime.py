@@ -28,17 +28,21 @@ def tools_system_addon(cfg: dict) -> str:
         pass
     if t.get("discovery", True):
         return (
-            "\n\nTools: You can discover tools on demand (built-in and third-party share one catalog). "
+            "\n\nTools: Discover and use tools on demand (built-in and third-party share one catalog). "
             "Workflow:\n"
             "1) search_tools (keywords) or list_tool_groups (categories) — summaries only\n"
             "2) describe_tool for 1–3 candidates you might use — full schema\n"
             "3) activate_tools with those names, then call them\n"
-            "Do NOT call tools for simple greetings, yes/no, or short conversational replies — "
-            "answer those in plain text. Never invent tool names. Prefer search/read over guessing. "
+            "Do NOT call tools for greetings, thanks, acknowledgments, opinions, or short chat — "
+            "answer those in plain text. Never invent tool names. "
+            "For current events / the live web, prefer a search tool over guessing. "
+            "For repo questions, prefer read/search tools over guessing. "
+            "Specialists: list_agents / create_agent / run_agent when a scoped helper helps; "
+            "children inherit your tools, gates, and budgets (can only tighten). "
             "Keep tool results focused — use offsets/limits."
         )
     return (
-        "\n\nTools: Enabled project tools are available. Prefer reading/searching before editing. "
+        "\n\nTools: Enabled tools are available. Prefer tools over guessing for live or workspace facts. "
         "Do NOT call tools for simple conversational replies. "
         "Keep arguments tight; large outputs are truncated."
     )
@@ -57,6 +61,13 @@ def execute_tool(cfg: dict, name: str, arguments: dict | str) -> ToolResult:
         return ToolResult(False, f"unknown tool: {name}")
     if not is_callable(cfg, name):
         hint = "search_tools then activate_tools first" if (cfg.get("tools") or {}).get("discovery", True) else "enable group in settings"
+        try:
+            from .. import agents as _agents
+            ok, why = _agents.can_call_tool(cfg, name)
+            if not ok and why:
+                hint = why
+        except Exception:
+            pass
         return ToolResult(False, f"tool not callable: {name} ({hint})")
     try:
         result = spec.handler(cfg, arguments)
@@ -66,6 +77,63 @@ def execute_tool(cfg: dict, name: str, arguments: dict | str) -> ToolResult:
         return ToolResult(True, str(result))
     limit = int((cfg.get("tools") or {}).get("max_result_chars", 8000))
     return result.truncated(limit)
+
+
+def _execute_tool_with_child_stream(
+    cfg: dict, name: str, arguments: dict | str,
+) -> Iterator[tuple[str, Any]]:
+    """Run a tool; for run_agent, yield ('ev', sse_dict) live then ('result', ToolResult).
+
+    Child agents are blocking; we run them on a worker thread so the parent SSE
+    loop can flush child_agent oneliners while the specialist works.
+    """
+    if name != "run_agent":
+        yield ("result", execute_tool(cfg, name, arguments))
+        return
+
+    import queue
+    import threading
+
+    q: queue.Queue = queue.Queue()
+    prev_emit = cfg.get("_emit")
+
+    def emit(ev: dict) -> None:
+        q.put(("ev", ev))
+        if callable(prev_emit):
+            try:
+                prev_emit(ev)
+            except Exception:
+                pass
+
+    cfg["_emit"] = emit
+    box: dict[str, Any] = {}
+
+    def worker() -> None:
+        try:
+            box["result"] = execute_tool(cfg, name, arguments)
+        except Exception as e:
+            box["error"] = e
+        finally:
+            q.put(("done", None))
+
+    t = threading.Thread(target=worker, daemon=True, name="super-run-agent")
+    t.start()
+    try:
+        while True:
+            kind, payload = q.get()
+            if kind == "ev" and isinstance(payload, dict):
+                yield ("ev", payload)
+            elif kind == "done":
+                break
+    finally:
+        t.join(timeout=2.0)
+        if prev_emit is None:
+            cfg.pop("_emit", None)
+        else:
+            cfg["_emit"] = prev_emit
+    if "error" in box:
+        raise box["error"]
+    yield ("result", box["result"])
 
 
 def _parse_tool_calls(message: dict) -> list[dict]:
@@ -96,6 +164,9 @@ def run_agent_stdlib(
 
     cfg.pop("_tool_session", None)  # fresh activation set per turn
     max_steps = max(1, int(cfg.get("envelope", {}).get("max_steps_per_task", 20)))
+    eff = cfg.get("_agent_effective") if isinstance(cfg.get("_agent_effective"), dict) else None
+    if eff and eff.get("max_steps"):
+        max_steps = max(1, min(max_steps, int(eff["max_steps"])))
     tool_trace: list[dict] = []
     tool_events: list[dict] = []  # UI-shaped {kind, name, ...}
     usage_steps: list[dict] = []
@@ -191,7 +262,11 @@ def run_agent_stream(
     cfg: dict,
     messages: list[dict],
 ) -> Iterator[dict[str, Any]]:
-    """Yield SSE-shaped events: tool_call, tool_result, llm_stats, delta, done-meta."""
+    """Yield SSE-shaped events with live token deltas (tools-on path).
+
+    Uses streaming completions so the UI sees tokens as they arrive. Tool-call
+    rounds still stream any preamble text, then emit tool_call/tool_result.
+    """
     from .. import llm
 
     try:
@@ -202,28 +277,66 @@ def run_agent_stream(
 
     cfg.pop("_tool_session", None)
     max_steps = max(1, int(cfg.get("envelope", {}).get("max_steps_per_task", 20)))
+    eff = cfg.get("_agent_effective") if isinstance(cfg.get("_agent_effective"), dict) else None
+    if eff and eff.get("max_steps"):
+        max_steps = max(1, min(max_steps, int(eff["max_steps"])))
     tool_trace: list[dict] = []
     usage_steps: list[dict] = []
     reply = ""
 
     for step in range(max_steps):
         tools = schemas_for_llm(cfg)
-        # Prefer non-stream for tool rounds (need full message with tool_calls).
-        msg, usage = llm.chat_message(cfg, messages, tools=tools or None)
+        content = ""
+        tool_calls: list[dict] = []
+        raw_tool_calls = None
+        usage = None
+        streamed_any = False
+        stream_ok = False
+
+        try:
+            for ev in llm.chat_stream(cfg, messages, tools=tools or None):
+                if "delta" in ev and ev["delta"]:
+                    streamed_any = True
+                    content += ev["delta"]
+                    yield {"delta": ev["delta"]}
+                if "tool_calls" in ev and isinstance(ev["tool_calls"], list):
+                    raw_tool_calls = ev["tool_calls"]
+                    tool_calls = _parse_tool_calls({"tool_calls": ev["tool_calls"]})
+                if "message" in ev and isinstance(ev["message"], dict):
+                    msg = ev["message"]
+                    content = msg.get("content") or content
+                    if msg.get("tool_calls"):
+                        raw_tool_calls = msg.get("tool_calls")
+                        tool_calls = _parse_tool_calls(msg)
+                    stream_ok = True
+                if "usage" in ev and isinstance(ev["usage"], dict):
+                    usage = ev["usage"]
+            if not stream_ok and not content and not tool_calls:
+                raise RuntimeError("empty stream completion")
+        except Exception:
+            # Provider may not support tools+stream — fall back to blocking turn.
+            msg, usage = llm.chat_message(cfg, messages, tools=tools or None)
+            content = (msg.get("content") or "") if isinstance(msg, dict) else str(msg)
+            raw_tool_calls = msg.get("tool_calls") if isinstance(msg, dict) else None
+            tool_calls = _parse_tool_calls(msg if isinstance(msg, dict) else {})
+            if not tool_calls and content and not streamed_any:
+                chunk = 24
+                for i in range(0, len(content), chunk):
+                    yield {"delta": content[i : i + chunk]}
+                streamed_any = True
+
         if usage:
             row = {**usage, "step": step}
             usage_steps.append(row)
             yield {"llm_stats": row}
-        content = (msg.get("content") or "") if isinstance(msg, dict) else str(msg)
-        tool_calls = _parse_tool_calls(msg if isinstance(msg, dict) else {})
 
         if not tool_calls:
             reply = content or ""
-            messages.append({"role": "assistant", "content": reply})
-            if reply:
-                chunk = 48
+            if not streamed_any and reply:
+                chunk = 24
                 for i in range(0, len(reply), chunk):
                     yield {"delta": reply[i : i + chunk]}
+            messages.append({"role": "assistant", "content": reply})
             yield {
                 "agent_meta": {
                     "steps": len(tool_trace),
@@ -235,16 +348,40 @@ def run_agent_stream(
             }
             return
 
+        # Tool round: keep assistant tool_call turn for protocol fidelity
         messages.append({
             "role": "assistant",
             "content": content or "",
-            "tool_calls": msg.get("tool_calls"),
+            "tool_calls": raw_tool_calls or [
+                {
+                    "id": c["id"],
+                    "type": "function",
+                    "function": {
+                        "name": c["name"],
+                        "arguments": c["arguments"] if isinstance(c["arguments"], str)
+                        else json.dumps(c["arguments"] or {}),
+                    },
+                }
+                for c in tool_calls
+            ],
         })
-        if content:
-            yield {"delta": content + "\n"}
         for call in tool_calls:
-            yield {"tool_call": {"step": step, "id": call["id"], "name": call["name"], "arguments": call["arguments"]}}
-            result = execute_tool(cfg, call["name"], call["arguments"])
+            yield {
+                "tool_call": {
+                    "step": step,
+                    "id": call["id"],
+                    "name": call["name"],
+                    "arguments": call["arguments"],
+                }
+            }
+            result = None
+            for kind, payload in _execute_tool_with_child_stream(cfg, call["name"], call["arguments"]):
+                if kind == "ev" and isinstance(payload, dict):
+                    yield payload
+                elif kind == "result":
+                    result = payload
+            if result is None:
+                result = ToolResult(False, "tool produced no result")
             tool_trace.append({"name": call["name"], "ok": result.ok, "taint": result.taint})
             messages.append({
                 "role": "tool",

@@ -11,14 +11,19 @@ type Props = {
   isRenaming: boolean;
   onRename: (id: string, title: string | null) => void;
   busy: boolean;
+  agentView?: { parentId: string; agentName: string; role?: string } | null;
+  onBackToParent?: () => void;
 };
 
-export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRename, busy }: Props) {
+export function ChatHeader({
+  activeId, activeMeta, messages, isRenaming, onRename, busy,
+  agentView, onBackToParent,
+}: Props) {
   const [headerEditing, setHeaderEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
 
   const commitRename = () => {
-    if (!activeId) { setHeaderEditing(false); return; }
+    if (!activeId || agentView) { setHeaderEditing(false); return; }
     const next = editTitle.trim();
     const prev = (activeMeta?.title || '').trim();
     setHeaderEditing(false);
@@ -30,7 +35,18 @@ export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRenam
       <Avatar role="assistant" />
       <div style={{ lineHeight: 1.2, flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 600, fontSize: 'var(--text-base)', color: 'var(--fg-0)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', minWidth: 0 }}>
-          {headerEditing && activeId ? (
+          {agentView && (
+            <button
+              type="button"
+              className="chat-header-icon-btn"
+              onClick={() => onBackToParent?.()}
+              title="Back to parent chat"
+              aria-label="Back to parent chat"
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          )}
+          {headerEditing && activeId && !agentView ? (
             <input
               value={editTitle}
               onChange={(e) => setEditTitle(e.target.value)}
@@ -44,9 +60,18 @@ export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRenam
               style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-base)', padding: '4px 8px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--accent-border)', background: 'var(--bg-1)', color: 'var(--fg-0)' }}
             />
           ) : (
-            <span className="truncate" style={{ flex: 1, minWidth: 0 }}>{activeMeta?.title || (activeId ? `Chat ${shortId(activeId, 8)}` : 'New conversation')}</span>
+            <span className="truncate" style={{ flex: 1, minWidth: 0 }}>
+              {agentView
+                ? agentView.agentName
+                : (activeMeta?.title || (activeId ? `Chat ${shortId(activeId, 8)}` : 'New conversation'))}
+            </span>
           )}
-          {activeId && !headerEditing && (
+          {agentView && (
+            <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)', flexShrink: 0 }}>
+              {agentView.role || 'agent'}
+            </Badge>
+          )}
+          {activeId && !headerEditing && !agentView && (
             <>
               <button
                 type="button"
@@ -79,7 +104,11 @@ export function ChatHeader({ activeId, activeMeta, messages, isRenaming, onRenam
           {activeId && <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)', flexShrink: 0 }}>{shortId(activeId, 8)}</Badge>}
         </div>
         <div className="small muted" style={{ fontSize: 'var(--text-xs)', marginTop: 1 }}>
-          <span className="truncate">{messages.length ? `${messages.length} messages` : 'Uses the current task and saved memory'}</span>
+          <span className="truncate">
+            {agentView
+              ? 'Sub-agent transcript · click parent chat to continue'
+              : (messages.length ? `${messages.length} messages` : 'Uses the current task and saved memory')}
+          </span>
         </div>
       </div>
       <span className="mono small muted chat-header-status">

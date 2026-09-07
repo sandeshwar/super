@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolEvent } from '../../types';
+import type { ChatMessage, ChildSpan, ToolEvent } from '../../types';
 import { Collapsible } from '../ui/Collapsible';
 import { Markdown } from '../Markdown';
 
@@ -40,6 +40,21 @@ function ToolTrace({ tools }: { tools: ToolEvent[] }) {
   );
 }
 
+function ChildAgentStrip({ children: kids, live }: { children: ChildSpan[]; live?: boolean }) {
+  if (!kids.length) return null;
+  return (
+    <div className="child-agent-strip" aria-live={live ? 'polite' : undefined}>
+      {kids.map((c) => (
+        <div key={c.span_id} className={`child-agent-line status-${c.status}`}>
+          <span className={`child-agent-dot status-${c.status}`} aria-hidden />
+          <span className="mono child-agent-role">{c.role || 'worker'}</span>
+          <span className="child-agent-summary" title={c.goal || c.summary}>{c.summary}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function MessageBubble({ message, busy, isLast }: { message: ChatMessage; busy?: boolean; isLast?: boolean }) {
   const isUser = message.role === 'user';
   if (isUser) {
@@ -60,10 +75,12 @@ export function MessageBubble({ message, busy, isLast }: { message: ChatMessage;
     );
   }
   const tools = message.tools || [];
+  const kids = message.children || [];
   return (
     <div style={{ padding: 'var(--space-1) 0', color: 'var(--fg-0)', minWidth: 0 }}>
+      {!!kids.length && <ChildAgentStrip children={kids} live={!!busy && !!isLast} />}
       {!!tools.length && <ToolTrace tools={tools} />}
-      <Markdown content={message.content || (busy && isLast ? (tools.length ? 'Working…' : 'Thinking…') : '')} />
+      <Markdown content={message.content || (busy && isLast ? (tools.length || kids.length ? 'Working…' : 'Thinking…') : '')} />
       {message.gate && message.gate.checked > 0 && (
         <div style={{ marginTop: 'var(--space-2)', background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
           <Collapsible

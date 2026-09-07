@@ -7,6 +7,22 @@ import type { GateInfo, Session, SessionSummary, TaskNode } from './types';
 import { AbortError, ApiError, NetworkError, StreamError, ValidationError } from './lib/errors';
 import type { IApiService } from './services/api.types';
 
+export type AgentSpec = {
+  id: string;
+  name: string;
+  role: string;
+  summary?: string;
+  system_addon?: string;
+  tools?: string[] | null;
+  groups?: string[] | null;
+  disabled?: string[];
+  status: string;
+  created_by?: string;
+  policy?: { may_write?: boolean; may_spawn?: boolean; may_manage_agents?: boolean };
+  created?: string;
+  updated?: string;
+};
+
 // ── Token storage abstraction (DIP) ──
 export interface TokenStore {
   get(): string;
@@ -174,6 +190,35 @@ class ApiService implements IApiService {
     return streamChatImpl(sessionId, message, onDelta, tokenStore, opts);
   }
   getTools() { return http.request<{ tools: Record<string, unknown> }>('/api/tools', 'GET'); }
+  listAgents(includeArchived = false) {
+    const q = includeArchived ? '?include_archived=1' : '';
+    return http.request<{ agents: AgentSpec[] }>(`/api/agents${q}`, 'GET');
+  }
+  getAgent(id: string) {
+    requireId(id);
+    return http.request<{ agent: AgentSpec }>(`/api/agent?id=${encodeURIComponent(id)}`, 'GET');
+  }
+  createAgent(body: Partial<AgentSpec> & { name: string }) {
+    requireNonEmpty(body.name, 'name');
+    return http.request<{ ok: boolean; agent: AgentSpec }>('/api/agents', 'POST', body);
+  }
+  updateAgent(id: string, patch: Record<string, unknown>) {
+    requireId(id);
+    return http.request<{ ok: boolean; agent: AgentSpec }>('/api/agent', 'POST', { id, action: 'update', ...patch });
+  }
+  approveAgent(id: string) {
+    requireId(id);
+    return http.request<{ ok: boolean; agent: AgentSpec }>('/api/agent', 'POST', { id, action: 'approve' });
+  }
+  archiveAgent(id: string) {
+    requireId(id);
+    return http.request<{ ok: boolean; agent: AgentSpec }>(`/api/agent?id=${encodeURIComponent(id)}`, 'DELETE');
+  }
+  runAgent(id: string, goal: string) {
+    requireId(id);
+    requireNonEmpty(goal, 'goal');
+    return http.request<{ ok: boolean; reply: string; span_id: string; run_id: string }>('/api/agent', 'POST', { id, action: 'run', goal });
+  }
   sbom() { return http.request<{ packages: { name: string; version: string }[]; count: number }>('/api/sbom', 'GET'); }
   sink() { return http.request<{ entries: number; violations: unknown[]; clean: boolean }>('/api/sink', 'GET'); }
   checklist() { return http.request<{ checklist: string[] }>('/api/checklist', 'GET'); }
