@@ -5,9 +5,8 @@ environment (SUPER_CONFIG, SUPER_TOKEN, SUPER_LLM_ENDPOINT, SUPER_LLM_MODEL,
 SUPER_PORT). Every value is type/range validated; invalid config raises
 ConfigError with the offending key instead of failing downstream.
 
-Auth: the server requires a bearer token. Operators may pin
-`server.token`; otherwise the first load generates a 32-byte token persisted
-at <state_dir>/.token with mode 0600.
+Auth: the dashboard is open on the LAN by default (binds 0.0.0.0). A server.token
+may still be generated for legacy CLI helpers, but it is not required for API access.
 """
 
 from __future__ import annotations
@@ -116,7 +115,7 @@ DEFAULTS = {
         "max_agents": 50,
         "allow_agent_create_roles": ["worker", "planner"],
     },
-    "server": {"host": "127.0.0.1", "port": 4311, "token": ""},
+    "server": {"host": "0.0.0.0", "port": 4311, "token": ""},
     "state_dir": ".super",
 }
 
@@ -172,8 +171,8 @@ def _validate(cfg: dict) -> None:
             if not isinstance(cfg[section][key], bool):
                 raise ConfigError(f"{section}.{key} must be boolean")
         host = cfg["server"]["host"]
-        if host not in ("127.0.0.1", "localhost"):
-            raise ConfigError("server.host must be 127.0.0.1 or localhost (local-only binding)")
+        if not isinstance(host, str) or not host.strip():
+            raise ConfigError("server.host must be a non-empty bind address (e.g. 0.0.0.0, 127.0.0.1)")
         port = cfg["server"]["port"]
         if not isinstance(port, int) or port < 1 or port > 65535:
             raise ConfigError("server.port must be an int in [1, 65535]")
@@ -367,6 +366,21 @@ def save(cfg: dict) -> None:
         raise ConfigError(f"cannot save config {path}: {e}") from e
 
 
+def _apply_env_overrides(cfg: dict) -> dict:
+    if os.environ.get("SUPER_LLM_ENDPOINT"):
+        cfg["llm"]["endpoint"] = os.environ["SUPER_LLM_ENDPOINT"]
+    if os.environ.get("SUPER_LLM_MODEL"):
+        cfg["llm"]["model"] = os.environ["SUPER_LLM_MODEL"]
+    if os.environ.get("SUPER_PORT"):
+        try:
+            cfg["server"]["port"] = int(os.environ["SUPER_PORT"])
+        except ValueError as e:
+            raise ConfigError("SUPER_PORT must be an integer") from e
+    if os.environ.get("SUPER_TOKEN"):
+        cfg["server"]["token"] = os.environ["SUPER_TOKEN"]
+    return cfg
+
+
 def load(path: str | None = None) -> dict:
     path = path or find_config()
     if path and os.path.exists(path):
@@ -384,18 +398,29 @@ def load(path: str | None = None) -> dict:
         cfg = json.loads(json.dumps(DEFAULTS))
         cfg["_config_path"] = None
         cfg["_root"] = os.getcwd()
-    # Environment overrides.
-    if os.environ.get("SUPER_LLM_ENDPOINT"):
-        cfg["llm"]["endpoint"] = os.environ["SUPER_LLM_ENDPOINT"]
-    if os.environ.get("SUPER_LLM_MODEL"):
-        cfg["llm"]["model"] = os.environ["SUPER_LLM_MODEL"]
-    if os.environ.get("SUPER_PORT"):
-        try:
-            cfg["server"]["port"] = int(os.environ["SUPER_PORT"])
-        except ValueError as e:
-            raise ConfigError("SUPER_PORT must be an integer") from e
-    if os.environ.get("SUPER_TOKEN"):
-        cfg["server"]["token"] = os.environ["SUPER_TOKEN"]
+    _apply_env_overrides(cfg)
+    if not os.path.isabs(cfg["state_dir"]):
+        cfg["state_dir"] = os.path.join(cfg["_root"], cfg["state_dir"])
+    _validate(cfg)
+    return _ensure_token(cfg)
+
+
+def load_workspace(root: str) -> dict:
+    """Load config for an explicit project/working directory.
+
+    Uses ``<root>/super.config.json`` when present; otherwise defaults with
+    ``_root`` pinned to ``root`` (does not fall back to process cwd / upward search).
+    """
+    root = os.path.abspath(os.path.expanduser(str(root or "").strip()))
+    if not root or not os.path.isdir(root):
+        raise ConfigError(f"workspace must be an existing directory: {root or '(empty)'}")
+    cfg_path = os.path.join(root, "super.config.json")
+    if os.path.isfile(cfg_path):
+        return load(cfg_path)
+    cfg = json.loads(json.dumps(DEFAULTS))
+    cfg["_config_path"] = None
+    cfg["_root"] = root
+    _apply_env_overrides(cfg)
     if not os.path.isabs(cfg["state_dir"]):
         cfg["state_dir"] = os.path.join(cfg["_root"], cfg["state_dir"])
     _validate(cfg)

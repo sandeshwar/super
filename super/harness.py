@@ -55,7 +55,9 @@ def build_system(cfg: dict) -> str:
         "children inherit your tools, gates, and budgets (can only tighten).\n\n"
         f"Current task card (if any — not every turn is about this):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
-        f"Workspace top level: {repo_overview(cfg)}"
+        f"Working directory: {cfg.get('_root', '.')}\n"
+        f"Top level: {repo_overview(cfg)}\n"
+        "File/shell tools default to the working directory; absolute paths and ~ work anywhere on this machine."
         f"{tools_system_addon(cfg)}"
     )
 

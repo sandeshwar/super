@@ -13,13 +13,30 @@ class TestConfig(unittest.TestCase):
         d = __import__("tempfile").mkdtemp(prefix="super-cfg-")
         try:
             cfg = C.load(os.path.join(d, "super.config.json"))
-            self.assertEqual(cfg["server"]["host"], "127.0.0.1")
+            self.assertEqual(cfg["server"]["host"], "0.0.0.0")
             self.assertTrue(cfg["gates"]["grounding"])
             self.assertTrue(cfg["server"]["token"])
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
-    def test_rejects_non_localhost(self):
+    def test_allows_lan_bind(self):
+        import json
+        import tempfile
+        from super import config as C
+
+        d = tempfile.mkdtemp(prefix="super-cfg-")
+        try:
+            p = os.path.join(d, "super.config.json")
+            cfg = json.loads(json.dumps(C.DEFAULTS))
+            cfg["server"]["host"] = "0.0.0.0"
+            with open(p, "w") as f:
+                json.dump(cfg, f)
+            loaded = C.load(p)
+            self.assertEqual(loaded["server"]["host"], "0.0.0.0")
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_rejects_empty_host(self):
         import json
         import tempfile
         from super import config as C
@@ -29,7 +46,7 @@ class TestConfig(unittest.TestCase):
         try:
             p = os.path.join(d, "super.config.json")
             bad = json.loads(json.dumps(C.DEFAULTS))
-            bad["server"]["host"] = "0.0.0.0"
+            bad["server"]["host"] = ""
             with open(p, "w") as f:
                 json.dump(bad, f)
             with self.assertRaises(ConfigError):

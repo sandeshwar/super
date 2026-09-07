@@ -33,6 +33,29 @@ export function Sidebar({
   view, tasks, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash,
   error, setError, offlinePending, mobileNav, refresh, onOpenProblems,
 }: Props) {
+  const applyWorkspace = async (path: string) => {
+    try {
+      await api.setWorkspace(path);
+      onWorkspaceChange(path);
+      setReloadFlash(true);
+      setTimeout(() => setReloadFlash(false), 1500);
+      void refresh();
+    } catch (err) {
+      setError(userMessage(err));
+    }
+  };
+
+  const browse = async () => {
+    try {
+      const res = await api.pickFolder(workspace || undefined);
+      if (res.cancelled || !res.path) return;
+      onWorkspaceChange(res.path);
+      await applyWorkspace(res.path);
+    } catch (err) {
+      setError(userMessage(err));
+    }
+  };
+
   return (
     <aside id="app-sidebar" className={`app-sidebar ${mobileNav ? 'open' : ''}`} aria-label="Sidebar">
       <div className="sidebar-top">
@@ -85,7 +108,7 @@ export function Sidebar({
 
         <div className="nav-section">
           <Collapsible
-            title="Folder"
+            title="Working dir"
             className="collapsible-bare"
             storageKey="side-workspace"
             meta={reloadFlash ? <span className="badge accent" style={{ fontSize: 9, padding: '1px 5px' }}>updated</span> : undefined}
@@ -95,20 +118,26 @@ export function Sidebar({
                 value={workspace}
                 onChange={(e) => onWorkspaceChange(e.target.value)}
                 placeholder="/path/to/project"
-                aria-label="Project folder"
+                aria-label="Working directory"
                 style={{ flex: 1, minWidth: 0, fontSize: 'var(--text-xs)', padding: '5px 8px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-1)', fontFamily: 'var(--font-mono)' }}
                 onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    try { await api.setWorkspace(workspace); setReloadFlash(true); setTimeout(() => setReloadFlash(false), 1500); void refresh(); } catch (err) { setError(userMessage(err)); }
-                  }
+                  if (e.key === 'Enter') await applyWorkspace(workspace);
                 }}
               />
               <button
                 className="btn btn-sm"
-                onClick={async () => {
-                  try { await api.setWorkspace(workspace); setReloadFlash(true); setTimeout(() => setReloadFlash(false), 1500); void refresh(); } catch (err) { setError(userMessage(err)); }
-                }}
-                aria-label="Set folder"
+                type="button"
+                onClick={() => void browse()}
+                aria-label="Browse for folder"
+                title="Browse"
+              >
+                Browse…
+              </button>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={() => void applyWorkspace(workspace)}
+                aria-label="Set working directory"
               >
                 set
               </button>

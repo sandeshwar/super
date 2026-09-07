@@ -178,18 +178,14 @@ class TestServer(unittest.TestCase):
                 # health is public
                 with urllib.request.urlopen(f"{base}/api/health", timeout=5) as r:
                     self.assertEqual(r.status, 200)
-                # authed reads
+                # open local API — no auth
                 for path in ("/api/tree", "/api/ledger", "/api/report", "/api/metrics"):
-                    code, body = self._get(base, path)
+                    code, body = self._get(base, path, token="")
                     self.assertEqual(code, 200)
                     self.assertIsInstance(body, dict)
-                # unauthed blocked
-                req = urllib.request.Request(f"{base}/api/tree")
-                try:
-                    urllib.request.urlopen(req, timeout=5)
-                    self.fail("expected 401")
-                except Exception as e:
-                    self.assertIn("401", str(e))
+                # no token still works
+                with urllib.request.urlopen(f"{base}/api/tree", timeout=5) as r:
+                    self.assertEqual(r.status, 200)
             finally:
                 httpd.shutdown()
                 httpd.server_close()

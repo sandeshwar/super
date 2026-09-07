@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import type { ChildSpan, SessionSummary } from '../../types';
-import { shortId } from '../../utils/format';
 
 type Props = {
   s: SessionSummary;
@@ -91,7 +90,6 @@ export function SessionRow({
           aria-label={`${selectMode ? 'Toggle' : 'Select'} ${s.title || s.id}`}
         >
           <span className="session-row-title">
-            <span className="session-row-id mono">{shortId(s.id, 6)}</span>
             {editing ? (
               <input
                 className="session-row-rename"

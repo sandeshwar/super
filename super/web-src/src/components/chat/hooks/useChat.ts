@@ -387,8 +387,12 @@ export function useChat(opts: ChatRouteOpts = {}) {
       const finalStats = res.gate?.agent?.llm_stats;
       if (finalStats) setLlmStats(finalStats);
       if (!activeId) setActiveId(res.session_id);
-      await loadSessions();
-      await loadLeaf();
+      // Unstick UI immediately — session refresh is non-critical.
+      busyRef.current = false;
+      setBusy(false);
+      abortRef.current = null;
+      void loadSessions();
+      void loadLeaf();
       setCost({
         prompt: Math.ceil((startChars + (leafRendered?.length || 0)) / 4),
         completion: Math.ceil(acc.length / 4),

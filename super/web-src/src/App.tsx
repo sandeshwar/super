@@ -4,7 +4,6 @@ import TreeView from './components/TreeView';
 import ApproveView from './components/ApproveView';
 import ReportView from './components/ReportView';
 import SettingsView from './components/SettingsView';
-import { AuthBanner } from './components/AuthBanner';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CommandPalette } from './components/CommandPalette';
 import { Sidebar } from './components/shell/Sidebar';
@@ -20,7 +19,7 @@ function AppShell() {
   const menuBtnRef = useRef<HTMLButtonElement | null>(null);
   const {
     model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
-    tasks, gates, criticals, error, setError, authNeeded, setAuthNeeded, offlinePending, loading, stats,
+    tasks, gates, criticals, error, setError, offlinePending, loading, stats,
     refresh, fetchModels, fetchWorkspace,
   } = useAppData();
 
@@ -166,17 +165,6 @@ function AppShell() {
 
         <main className="app-main" style={{ viewTransitionName: 'content' } as React.CSSProperties}>
           <div className="content-max">
-            <AuthBanner
-              visible={authNeeded}
-              onAuthed={() => {
-                setAuthNeeded(false);
-                setError(null);
-                window.dispatchEvent(new Event('super-refresh'));
-                void refresh();
-                void fetchModels();
-                void fetchWorkspace();
-              }}
-            />
             {loading ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)', padding: 'var(--space-4) 0' }} aria-busy="true" aria-label="Loading">
                 <div className="skeleton" style={{ height: 48 }} />

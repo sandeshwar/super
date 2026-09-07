@@ -193,7 +193,18 @@ def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None
                 if tool_calls:
                     assembled["tool_calls"] = tool_calls
                 yield {"message": assembled}
-                break
+                return
+        # EOF without a done frame — still finish so the agent loop doesn't hang.
+        if content_parts or tool_calls:
+            if tool_calls:
+                yield {"tool_calls": tool_calls}
+            assembled = {
+                "role": "assistant",
+                "content": "".join(content_parts),
+            }
+            if tool_calls:
+                assembled["tool_calls"] = tool_calls
+            yield {"message": assembled}
 
 
 def chat_stream_text(cfg: dict, messages: list[dict]):

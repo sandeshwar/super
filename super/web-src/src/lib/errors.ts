@@ -75,7 +75,7 @@ export function userMessage(e: unknown): string {
     if (err.isServer) return 'Server error — check the backend logs';
     return err.message;
   }
-  if (err instanceof NetworkError) return 'Network error — is the server running on 127.0.0.1:4311?';
+  if (err instanceof NetworkError) return 'Network error — is the SUPER server running?';
   if (err instanceof ValidationError) return err.message;
   return err.message || 'Something went wrong';
 }

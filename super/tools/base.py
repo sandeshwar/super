@@ -64,25 +64,32 @@ def dump_json(obj: Any, limit: int = 12000) -> str:
     return text
 
 
-def safe_path(cfg: dict, rel: str) -> str:
-    """Resolve path under workspace root; refuse escapes."""
+def resolve_path(cfg: dict, rel: str) -> str:
+    """Resolve a filesystem path.
+
+    Relative paths are rooted at the workspace working directory (`_root`).
+    Absolute paths and `~` expand anywhere on the host — workspace is cwd,
+    not a sandbox.
+    """
     root = os.path.abspath(cfg.get("_root") or os.getcwd())
     rel = (rel or "").strip() or "."
+    if rel.startswith("~"):
+        return os.path.abspath(os.path.expanduser(rel))
     if os.path.isabs(rel):
-        cand = os.path.abspath(rel)
-    else:
-        cand = os.path.abspath(os.path.join(root, rel))
-    try:
-        if os.path.commonpath([root, cand]) != root:
-            raise ValueError(f"path escapes workspace: {rel}")
-    except ValueError:
-        raise ValueError(f"path escapes workspace: {rel}") from None
-    return cand
+        return os.path.abspath(rel)
+    return os.path.abspath(os.path.join(root, rel))
+
+
+# Back-compat alias used throughout builtins / packs.
+safe_path = resolve_path
 
 
 def rel_display(cfg: dict, abs_path: str) -> str:
     root = os.path.abspath(cfg.get("_root") or os.getcwd())
+    abs_path = os.path.abspath(abs_path)
     try:
-        return os.path.relpath(abs_path, root)
+        if os.path.commonpath([root, abs_path]) == root:
+            return os.path.relpath(abs_path, root)
     except ValueError:
-        return abs_path
+        pass
+    return abs_path

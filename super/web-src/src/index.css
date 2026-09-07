@@ -531,14 +531,6 @@ tbody tr:hover td{background:var(--surface-overlay)}
 .context-bar{border-bottom:1px solid var(--border-subtle);background:var(--bg-1);padding:1px var(--space-1)}
 .context-bar-body{display:flex;align-items:center;gap:var(--space-2);font-size:var(--text-xs);color:var(--fg-3);padding-bottom:var(--space-2);flex-wrap:wrap}
 .context-bar-meter{flex:1;max-width:200px;height:4px;border-radius:99px;background:var(--bg-4);overflow:hidden}
-.auth-banner{
-  margin-bottom:var(--space-3);padding:var(--space-3);display:flex;flex-wrap:wrap;gap:var(--space-3);
-  align-items:center;justify-content:space-between;
-  border:1px solid var(--yellow-border);background:var(--yellow-bg);
-}
-.auth-banner-copy{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}
-.auth-banner-form{display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap}
-.auth-banner-form .input{min-width:200px;flex:1}
 @media(max-width:1100px){
   .kpi-grid{grid-template-columns:repeat(2,1fr)}
   .cols{grid-template-columns:1fr}
@@ -713,6 +705,7 @@ pre code{padding:0;background:transparent;border:none}
   transition:background var(--ease), border-color var(--ease);
 }
 .session-row-main{
+  position:relative;
   display:flex; align-items:flex-start; gap:4px;
   min-width:0; width:100%;
 }
@@ -729,14 +722,6 @@ pre code{padding:0;background:transparent;border:none}
   display:flex; align-items:center; gap:var(--space-2);
   min-width:0; max-width:100%;
 }
-.session-row-id{
-  flex-shrink:0; font-size:var(--text-2xs); padding:2px 6px;
-  border-radius:var(--radius-xs); background:var(--bg-3); color:var(--fg-3);
-  border:1px solid var(--border);
-}
-.session-row.active .session-row-id{
-  background:var(--accent); color:var(--accent-fg); border-color:var(--accent);
-}
 .session-row-name{
   font-weight:500; font-size:var(--text-base);
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
@@ -744,7 +729,7 @@ pre code{padding:0;background:transparent;border:none}
 }
 .session-row.active .session-row-name{font-weight:600; color:var(--fg-0)}
 .session-row-rename{
-  flex:1; font-size:var(--text-base); padding:2px 6px;
+  flex:1; min-width:0; width:100%; font-size:var(--text-base); padding:2px 6px;
   border-radius:var(--radius-xs); border:1px solid var(--accent-border);
   background:var(--bg-1); color:var(--fg-0);
 }
@@ -758,8 +743,8 @@ pre code{padding:0;background:transparent;border:none}
 }
 .session-row-meta-live{color:var(--yellow)}
 .session-row-actions{
-  display:flex; flex-direction:row; gap:2px; flex-shrink:0;
-  margin-top:2px; margin-right:2px;
+  position:absolute; top:2px; right:2px; z-index:1;
+  display:flex; flex-direction:row; gap:2px;
   background:var(--bg-2); border:1px solid var(--border-subtle); border-radius:var(--radius-sm);
   padding:2px; box-shadow:var(--shadow-sm);
   opacity:0; visibility:hidden; pointer-events:none;
@@ -770,6 +755,10 @@ pre code{padding:0;background:transparent;border:none}
 .session-row:hover .session-row-actions,
 .session-row-actions:focus-within{
   opacity:1; visibility:visible; pointer-events:auto;
+}
+.session-row:hover .session-row-select,
+.session-row-main:has(.session-row-actions:focus-within) .session-row-select{
+  padding-right:90px;
 }
 .session-row.editing .session-row-actions{display:none}
 .session-row-btn{
@@ -782,6 +771,7 @@ pre code{padding:0;background:transparent;border:none}
 .session-row-delete:hover{background:var(--red-bg); border-color:var(--red-border); color:var(--red)}
 @media (hover:none){
   .session-row-actions{opacity:1; visibility:visible; pointer-events:auto}
+  .session-row-select{padding-right:90px}
 }
 
 .session-span-list{

@@ -79,6 +79,7 @@ export interface IModelService {
 export interface IWorkspaceService {
   workspace(): Promise<{ workspace: string; state_dir: string; config_path: string | null }>;
   setWorkspace(path: string): Promise<{ ok: boolean; workspace: string }>;
+  pickFolder(path?: string | null): Promise<{ ok: boolean; cancelled: boolean; path: string | null }>;
   reload(): Promise<{ ok: boolean; workspace: string; model: string }>;
 }
 export interface IConfigService {

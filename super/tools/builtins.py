@@ -182,13 +182,13 @@ def grep_tool(cfg: dict, args: dict) -> ToolResult:
 
 def glob_files(cfg: dict, args: dict) -> ToolResult:
     pattern = str(args.get("pattern") or "**/*")
-    root = Path(cfg.get("_root") or os.getcwd())
+    root = Path(safe_path(cfg, args.get("path") or "."))
     matches: list[str] = []
     try:
         for p in root.glob(pattern):
             if any(part in (".git", ".super", "node_modules", "__pycache__", ".venv") for part in p.parts):
                 continue
-            matches.append(str(p.relative_to(root)))
+            matches.append(rel_display(cfg, str(p)))
             if len(matches) >= 200:
                 break
     except Exception as e:
@@ -391,7 +391,7 @@ def memory_add(cfg: dict, args: dict) -> ToolResult:
     return ToolResult(True, f"stored claim: {claim[:200]}")
 
 def repo_tree(cfg: dict, args: dict) -> ToolResult:
-    root = Path(cfg.get("_root") or os.getcwd())
+    root = Path(safe_path(cfg, args.get("path") or "."))
     max_depth = max(1, min(int(args.get("depth") or 3), 6))
     lines: list[str] = []
 
@@ -411,7 +411,7 @@ def repo_tree(cfg: dict, args: dict) -> ToolResult:
             if kid.is_dir():
                 walk(kid, depth + 1, prefix + ("    " if last else "│   "))
 
-    lines.append(root.name + "/")
+    lines.append(str(root) + "/")
     walk(root, 1)
     return ToolResult(True, "\n".join(lines), {"lines": len(lines)})
 

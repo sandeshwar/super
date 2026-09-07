@@ -25,7 +25,7 @@ const SECTIONS: { id: SettingsSection; title: string; blurb: string }[] = [
   { id: 'tools', title: 'Tools', blurb: 'Agent tools, checks, and chat helpers' },
   { id: 'agents', title: 'Agents', blurb: 'Specialized sub-agents (CRUD + inherit parent rules)' },
   { id: 'mcp', title: 'MCP servers', blurb: 'Connect external tool servers' },
-  { id: 'workspace', title: 'Folder', blurb: 'Project path and config file' },
+  { id: 'workspace', title: 'Working dir', blurb: 'Project folder — default cwd, not a sandbox' },
   { id: 'safety', title: 'Safety', blurb: 'Secret scans and package checks' },
   { id: 'about', title: 'About', blurb: 'Version and connection status' },
 ];
@@ -1217,15 +1217,49 @@ function WorkspaceSection({
   onApply: () => void;
   onReload: () => void;
 }) {
+  const [picking, setPicking] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
+
+  const browse = async () => {
+    setPicking(true);
+    setPickError(null);
+    try {
+      const res = await api.pickFolder(wsDraft || workspace || undefined);
+      if (res.cancelled || !res.path) return;
+      setWsDraft(res.path);
+    } catch (e) {
+      setPickError(userMessage(e));
+    } finally {
+      setPicking(false);
+    }
+  };
+
   return (
     <div className="settings-stack">
       <Card>
-        <CardHead><h3>Project folder</h3></CardHead>
+        <CardHead><h3>Working directory</h3></CardHead>
         <CardBody className="stack gap">
+          <p className="settings-hint">
+            Default cwd for tools and config. Absolute paths still reach the whole machine —
+            this is not a sandbox.
+          </p>
           <div className="settings-field">
-            <label htmlFor="ws-path">Folder path</label>
-            <Input id="ws-path" value={wsDraft} onChange={(e) => setWsDraft(e.target.value)} placeholder="/path/to/project" className="mono" />
+            <label htmlFor="ws-path">Path</label>
+            <div className="row gap-sm" style={{ alignItems: 'stretch' }}>
+              <Input
+                id="ws-path"
+                value={wsDraft}
+                onChange={(e) => setWsDraft(e.target.value)}
+                placeholder="/path/to/project"
+                className="mono"
+                style={{ flex: 1 }}
+              />
+              <Button variant="secondary" type="button" disabled={picking || saving} onClick={() => void browse()}>
+                {picking ? 'Browsing…' : 'Browse…'}
+              </Button>
+            </div>
             <p className="settings-hint">Current: <span className="mono">{workspace || '—'}</span></p>
+            {pickError && <Alert variant="warning">{pickError}</Alert>}
           </div>
           <div className="row gap-sm">
             <Button variant="primary" disabled={saving || !wsDraft.trim()} onClick={onApply}>Use this folder</Button>
@@ -1278,7 +1312,6 @@ function AboutSection({
   cfg: PublicConfig | null;
   onRefresh: () => void;
 }) {
-  const tokenPresent = typeof sessionStorage !== 'undefined' && !!sessionStorage.getItem('super_token');
   return (
     <div className="settings-stack">
       <Card>
@@ -1292,7 +1325,6 @@ function AboutSection({
               {health?.llm_reachable ? 'reachable' : health?.llm_detail || 'unknown'}
             </code>
           </div>
-          <div className="settings-kv"><span>Auth token</span><code>{tokenPresent ? 'present in this browser' : 'not set in session'}</code></div>
           <div className="settings-kv"><span>Folder</span><code>{cfg?.workspace || '—'}</code></div>
           <Button size="sm" variant="ghost" onClick={onRefresh} style={{ alignSelf: 'flex-start' }}>Refresh status</Button>
         </CardBody>

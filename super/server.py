@@ -1,16 +1,15 @@
 """Production local API + dashboard (doc 06).
 
-Binds 127.0.0.1 only, requires a bearer token on every /api/* route except
-liveness (/api/health). Tokens ride the Authorization header, X-Super-Token,
-or ?token= (dashboard convenience — the CLI prints the tokenized URL).
-Stdlib only. All mutations validate input, audit-log, and return typed
-errors without stack leaks.
+Binds 0.0.0.0 by default so the dashboard is reachable on the LAN.
+No bearer token required. Stdlib only. All mutations validate input, audit-log,
+and return typed errors without stack leaks.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -21,28 +20,6 @@ MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
         ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png"}
 
 MAX_BODY = 1_000_000
-
-
-def _token_of(handler: BaseHTTPRequestHandler, query: dict) -> str:
-    auth = handler.headers.get("Authorization", "")
-    if auth.startswith("Bearer "):
-        return auth[7:].strip()
-    if handler.headers.get("X-Super-Token"):
-        return handler.headers.get("X-Super-Token", "").strip()
-    vals = query.get("token", [])
-    return vals[0] if vals else ""
-
-
-
-def _authorized(handler: BaseHTTPRequestHandler, query: dict) -> bool:
-    if CFG is None:
-        return False
-    want = (CFG.get("server", {}) or {}).get("token", "")
-    if not want:
-        return True
-    import hmac as _hmac
-
-    return _hmac.compare_digest(_token_of(handler, query), want)
 
 
 def _report(cfg: dict) -> dict:
@@ -108,10 +85,7 @@ class Handler(BaseHTTPRequestHandler):
         return obj if isinstance(obj, dict) else {}
 
     def _require_auth(self, query: dict) -> bool:
-        if _authorized(self, query):
-            return True
-        self._send_json({"error": "unauthorized — supply ?token= or Authorization: Bearer", "code": 401}, 401)
-        return False
+        return True
 
     def _prefers_html(self) -> bool:
         """Browser navigations prefer text/html; curl/fetch keep JSON on colliding paths."""
@@ -583,34 +557,37 @@ class Handler(BaseHTTPRequestHandler):
                 new_ws = str(body.get("path", "")).strip()
                 if not new_ws:
                     return self._send_json({"error": "path required", "code": 400}, 400)
-                # security: must be existing dir, local, not outside allowed
                 import pathlib as _pl
                 p = _pl.Path(new_ws).expanduser().resolve()
                 if not p.exists() or not p.is_dir():
                     return self._send_json({"error": "workspace must be an existing directory", "code": 400}, 400)
-                # prevent escaping to system roots without super.config.json
-                # allow any local dir, but ensure we can create state_dir
                 try:
                     (p / ".super").mkdir(exist_ok=True)
                 except Exception as e:
                     return self._send_json({"error": f"cannot init workspace: {e}", "code": 500}, 500)
-                # reload config from new workspace
                 try:
                     from . import config as _cfg
-                    new_cfg = _cfg.load(str(p / "super.config.json") if (p / "super.config.json").exists() else None)
-                    # if loaded from different path, adjust _root
-                    if not new_cfg.get("_config_path"):
-                        new_cfg["_root"] = str(p)
-                        new_cfg["_config_path"] = str(p / "super.config.json")
-                    # preserve token from old cfg if new has empty
+                    from .errors import ConfigError
+                    new_cfg = _cfg.load_workspace(str(p))
                     if not new_cfg["server"]["token"]:
                         new_cfg["server"]["token"] = CFG["server"]["token"]
-                    # swap global
                     CFG.clear()
                     CFG.update(new_cfg)
                     return self._send_json({"ok": True, "workspace": CFG["_root"]})
+                except ConfigError as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
                 except Exception as e:
                     return self._send_json({"error": f"cannot load workspace: {e}", "code": 500}, 500)
+            if self.path.split("?")[0] == "/api/fs/pick":
+                try:
+                    from . import fsutil
+                    initial = str(body.get("path") or CFG.get("_root") or "").strip() or None
+                    picked = fsutil.pick_directory(initial)
+                    if not picked:
+                        return self._send_json({"ok": False, "cancelled": True, "path": None})
+                    return self._send_json({"ok": True, "cancelled": False, "path": picked})
+                except Exception as e:
+                    return self._send_json({"error": f"folder picker failed: {e}", "code": 500}, 500)
             if self.path.split("?")[0] == "/api/reload":
                 try:
                     from . import config as _cfg
@@ -668,6 +645,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
                 try:
@@ -755,11 +733,13 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     self.wfile.write(
                         f"data: {json.dumps({'done': True, 'session_id': sid, 'gate': gate})}\n\n".encode())
+                    self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
                     pass
                 except Exception as e:
                     try:
                         self.wfile.write(f"data: {json.dumps({'error': str(e)})}\n\n".encode())
+                        self.wfile.flush()
                     except Exception:
                         pass
                 return
@@ -840,15 +820,45 @@ def _watch_config():
     t.start()
 
 
+def _lan_urls(port: int) -> list[str]:
+    """Best-effort LAN IPv4 URLs for the startup banner."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    try:
+        hostname = socket.gethostname()
+        for info in socket.getaddrinfo(hostname, None, socket.AF_INET, socket.SOCK_STREAM):
+            ip = info[4][0]
+            if ip.startswith("127.") or ip in seen:
+                continue
+            seen.add(ip)
+            urls.append(f"http://{ip}:{port}/")
+    except OSError:
+        pass
+    if not urls:
+        # Fallback: UDP connect trick to discover the primary outbound IP.
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect(("8.8.8.8", 80))
+                ip = s.getsockname()[0]
+                if ip and not ip.startswith("127."):
+                    urls.append(f"http://{ip}:{port}/")
+            finally:
+                s.close()
+        except OSError:
+            pass
+    return urls
+
+
 def serve(cfg: dict) -> None:
     global CFG
     CFG = cfg
     host, port = cfg["server"]["host"], cfg["server"]["port"]
-    if host not in ("127.0.0.1", "localhost"):
-        raise ValueError("refusing to bind non-localhost")
-    token = (cfg.get("server", {}) or {}).get("token", "")
     _watch_config()
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"SUPER { '1.0.0'} dashboard on http://{host}:{port}/?token={token}")
-    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans")
+    print(f"SUPER 1.0.0 dashboard on http://{host}:{port}/")
+    print(f"  local:  http://127.0.0.1:{port}/")
+    for u in _lan_urls(port):
+        print(f"  lan:    {u}")
+    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans /api/fs/pick")
     httpd.serve_forever()

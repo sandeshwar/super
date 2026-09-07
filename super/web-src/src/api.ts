@@ -243,6 +243,13 @@ class ApiService implements IApiService {
   setModel(model: string) { requireNonEmpty(model, 'model'); return http.request<{ ok: boolean; model: string; context_length?: number | null }>('/api/model', 'POST', { model }); }
   workspace() { return http.request<{ workspace: string; state_dir: string; config_path: string | null }>('/api/workspace', 'GET'); }
   setWorkspace(path: string) { requireNonEmpty(path, 'path'); return http.request<{ ok: boolean; workspace: string }>('/api/workspace', 'POST', { path }); }
+  pickFolder(path?: string | null) {
+    return http.request<{ ok: boolean; cancelled: boolean; path: string | null }>(
+      '/api/fs/pick',
+      'POST',
+      path ? { path } : {},
+    );
+  }
   reload() { return http.request<{ ok: boolean; workspace: string; model: string }>('/api/reload', 'POST', {}); }
   getConfig() { return http.request<{ config: Record<string, unknown> }>('/api/config', 'GET'); }
   updateConfig(patch: Record<string, unknown>) {
@@ -326,9 +333,9 @@ async function streamChatImpl(
   let done: { session_id: string; gate: GateInfo } | null = null;
 
   try {
-    for (;;) {
+    outer: for (;;) {
       const { value, done: eof } = await reader.read();
-      if (value) buf += dec.decode(value, { stream: true });
+      if (value) buf += dec.decode(value, { stream: !eof });
       let idx: number;
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, idx);
@@ -359,11 +366,11 @@ async function streamChatImpl(
           if (o.done) {
             if (!o.session_id || !o.gate) throw new StreamError('Malformed done frame');
             done = { session_id: o.session_id, gate: o.gate };
+            break outer; // don't wait for connection close / keep-alive
           }
         }
       }
       if (eof) break;
-      if (done && buf.length === 0) break;
     }
   } catch (e) {
     if ((e as Error).name === 'AbortError') {
@@ -375,6 +382,7 @@ async function streamChatImpl(
   } finally {
     window.clearTimeout(timeout);
     if (external) external.removeEventListener('abort', onExternalAbort);
+    try { await reader.cancel(); } catch { /* ignore */ }
     try { reader.releaseLock(); } catch { /* ignore */ }
   }
 

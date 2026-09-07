@@ -58,7 +58,7 @@
     "require_scorecard": true
   },
   "server": {
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 4311,
     "token": "REPLACE_WITH_LONG_RANDOM_TOKEN"
   },

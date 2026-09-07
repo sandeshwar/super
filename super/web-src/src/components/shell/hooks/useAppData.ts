@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, getAuthToken, hasAuthToken } from '../../../api';
+import { api } from '../../../api';
 import type { TaskNode } from '../../../types';
 import { useOfflineQueue } from '../../../hooks/useOfflineQueue';
-import { ApiError, userMessage } from '../../../lib/errors';
+import { userMessage } from '../../../lib/errors';
 
 export type Stats = { proven: number; total: number; pct: number; gatePass: number; gateReject: number; pending: number; waiting: number; doing: number };
 
 export function useAppData() {
-  // Pick up ?token= before any child effect fires.
-  getAuthToken();
-
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [contextLength, setContextLength] = useState<number | null>(null);
@@ -19,7 +16,6 @@ export function useAppData() {
   const [gates, setGates] = useState<Record<string, { pass: number; reject: number }>>({});
   const [criticals, setCriticals] = useState<unknown[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [authNeeded, setAuthNeeded] = useState(() => !hasAuthToken());
   const [loading, setLoading] = useState(true);
   const { pending: offlinePending, enqueue } = useOfflineQueue();
 
@@ -31,7 +27,6 @@ export function useAppData() {
   useEffect(() => { (window as unknown as { superEnqueue: typeof enqueue }).superEnqueue = enqueue; }, [enqueue]);
 
   const refresh = useCallback(async () => {
-    getAuthToken(); // re-read ?token= if navigated with it
     try {
       const [h, t, l] = await Promise.all([api.health(), api.tree(), api.ledger()]);
       setModel(h.model ?? '');
@@ -39,18 +34,8 @@ export function useAppData() {
       setGates(l.gates);
       setCriticals(l.open_criticals);
       setError(null);
-      setAuthNeeded(false);
     } catch (e) {
-      if (e instanceof ApiError && e.isAuth) {
-        setAuthNeeded(true);
-      } else {
-        const msg = userMessage(e);
-        if (!String(msg).toLowerCase().includes('unauthorized') && !String(msg).toLowerCase().includes('sign-in')) {
-          setError(msg);
-        } else {
-          setAuthNeeded(true);
-        }
-      }
+      setError(userMessage(e));
     } finally {
       setLoading(false);
     }
@@ -117,7 +102,7 @@ export function useAppData() {
 
   return {
     model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
-    tasks, gates, criticals, error, setError, authNeeded, setAuthNeeded, offlinePending, loading,
+    tasks, gates, criticals, error, setError, offlinePending, loading,
     stats, refresh, fetchModels, fetchWorkspace, enqueue,
   };
 }

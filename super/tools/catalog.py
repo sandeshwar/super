@@ -165,41 +165,46 @@ _reg(ToolSpec(
 
 # ── files ─────────────────────────────────────────────────────────────
 _reg(ToolSpec("list_dir", "files", "List a directory",
-              "List files and directories under a workspace-relative path.",
-              _props(path=_str("Relative path", **{"default": "."})), B.list_dir))
+              "List files and directories. Path may be workspace-relative or absolute (~ ok).",
+              _props(path=_str("Path (relative to working dir or absolute)", **{"default": "."})), B.list_dir))
 _reg(ToolSpec("read_file", "files", "Read file lines",
-              "Read a text file with optional line offset/limit. Prefer small ranges.",
-              _props(path=_str("Relative path", req=True),
+              "Read a text file with optional line offset/limit. Prefer small ranges. "
+              "Path may be workspace-relative or absolute.",
+              _props(path=_str("Path (relative or absolute)", req=True),
                      offset=_int("Start line (0-based)", **{"default": 0}),
                      limit=_int("Max lines", **{"default": 200})), B.read_file))
 _reg(ToolSpec("write_file", "files", "Write whole file",
-              "Create or overwrite a file with full content. Prefer edit_file for small changes.",
-              _props(path=_str("Relative path", req=True), content=_str("Full file content", req=True)),
+              "Create or overwrite a file with full content. Prefer edit_file for small changes. "
+              "Path may be workspace-relative or absolute.",
+              _props(path=_str("Path (relative or absolute)", req=True), content=_str("Full file content", req=True)),
               B.write_file, risk="high"))
 _reg(ToolSpec("edit_file", "files", "Surgical string replace",
-              "Replace an exact old string with new in a file. Fails if old is missing or ambiguous.",
-              _props(path=_str("Relative path", req=True),
+              "Replace an exact old string with new in a file. Fails if old is missing or ambiguous. "
+              "Path may be workspace-relative or absolute.",
+              _props(path=_str("Path (relative or absolute)", req=True),
                      old=_str("Exact text to find", req=True),
                      new=_str("Replacement text", req=True),
                      replace_all=_bool("Replace all occurrences")),
               B.edit_file, risk="high"))
 _reg(ToolSpec("mkdir", "files", "Create directory",
-              "Create a directory (and parents) under the workspace.",
-              _props(path=_str("Relative path", req=True)), B.mkdir_tool))
+              "Create a directory (and parents). Path may be workspace-relative or absolute.",
+              _props(path=_str("Path (relative or absolute)", req=True)), B.mkdir_tool))
 _reg(ToolSpec("delete_path", "files", "Delete file or folder",
-              "Delete a file or directory under the workspace. Use carefully.",
-              _props(path=_str("Relative path", req=True)), B.delete_file, risk="high"))
+              "Delete a file or directory. Path may be workspace-relative or absolute. Use carefully.",
+              _props(path=_str("Path (relative or absolute)", req=True)), B.delete_file, risk="high"))
 
 # ── search ────────────────────────────────────────────────────────────
 _reg(ToolSpec("grep", "search", "Search file contents",
-              "Ripgrep (or fallback) content search. Returns path:line:text hits.",
+              "Ripgrep (or fallback) content search. Returns path:line:text hits. "
+              "Search root may be workspace-relative or absolute.",
               _props(pattern=_str("Regex or literal pattern", req=True),
                      path=_str("Root path", **{"default": "."}),
                      glob=_str("File glob filter, e.g. '*.py'"),
                      max_hits=_int("Max hits", **{"default": 40})), B.grep_tool))
 _reg(ToolSpec("glob_files", "search", "Find files by name",
-              "Glob for paths under the workspace (e.g. '**/*.tsx').",
-              _props(pattern=_str("Glob pattern", req=True)), B.glob_files))
+              "Glob for paths under a directory (default: working dir). Path may be absolute.",
+              _props(pattern=_str("Glob pattern", req=True),
+                     path=_str("Root directory", **{"default": "."})), B.glob_files))
 _reg(ToolSpec("find_symbol", "search", "Find symbol definitions",
               "Locate likely definitions of a function/class/const name.",
               _props(name=_str("Symbol name", req=True), path=_str("Root", **{"default": "."})),
@@ -207,9 +212,10 @@ _reg(ToolSpec("find_symbol", "search", "Find symbol definitions",
 
 # ── shell ─────────────────────────────────────────────────────────────
 _reg(ToolSpec("run_command", "shell", "Run a shell command",
-              "Execute a shell command in the workspace (or cwd). Output truncated by runtime limits.",
+              "Execute a shell command. Default cwd is the working directory; "
+              "cwd may be absolute. Output truncated by runtime limits.",
               _props(command=_str("Shell command", req=True),
-                     cwd=_str("Working directory relative to workspace"),
+                     cwd=_str("Working directory (relative or absolute)"),
                      timeout_s=_int("Timeout seconds", **{"default": 60})),
               B.run_command, risk="high"))
 
@@ -259,8 +265,9 @@ _reg(ToolSpec("memory_add", "memory", "Remember a claim",
 
 # ── project ───────────────────────────────────────────────────────────
 _reg(ToolSpec("repo_tree", "project", "Show folder tree",
-              "Print a shallow directory tree of the workspace.",
-              _props(depth=_int("Max depth", **{"default": 3})), B.repo_tree))
+              "Print a shallow directory tree (default: working directory). Path may be absolute.",
+              _props(depth=_int("Max depth", **{"default": 3}),
+                     path=_str("Root directory", **{"default": "."})), B.repo_tree))
 _reg(ToolSpec("read_config", "project", "Read public config",
               "Return the public (non-secret) config, or one section.",
               _props(section=_str("Optional section name")), B.read_config_tool))
