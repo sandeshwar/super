@@ -17,7 +17,7 @@ function Kpi({ label, value, sub, color, icon }: { label: string; value: string;
         <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>{label}</span>
         <span style={{ width: 28, height: 28, borderRadius: 'var(--radius-sm)', background: 'var(--bg-3)', border: '1px solid var(--border)', display: 'grid', placeItems: 'center', color }}>{icon}</span>
       </div>
-      <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800, letterSpacing: 'var(--tracking-tight)', lineHeight: 1, color }}>{value}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.03em', lineHeight: 1, color }}>{value}</div>
       <div className="small muted" style={{ fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)' }}>{sub}</div>
     </Card>
   );
@@ -85,13 +85,45 @@ export default function ReportView({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'tasks.csv'; a.click(); URL.revokeObjectURL(url);
   };
+  const [bulkNote, setBulkNote] = useState('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
   const bulkApprove = async () => {
     const ids = Array.from(selected);
-    for (const id of ids) { try { await api.approve(id, 'bulk approved'); } catch {} }
+    if (!ids.length) return;
+    const note = bulkNote.trim();
+    if (!note) {
+      setBulkMsg('Add a proof note before approving selected tasks.');
+      return;
+    }
+    if (!window.confirm(`Mark ${ids.length} task${ids.length !== 1 ? 's' : ''} done with this proof?\n\n${note}`)) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    const failed: string[] = [];
+    for (const id of ids) {
+      try { await api.approve(id, note); }
+      catch { failed.push(id); }
+    }
     setSelected(new Set());
+    setBulkNote('');
+    setBulkBusy(false);
+    if (failed.length) setBulkMsg(`Done for ${ids.length - failed.length}; failed: ${failed.join(', ')}`);
+    else setBulkMsg(`Marked ${ids.length} task${ids.length !== 1 ? 's' : ''} done`);
+    window.dispatchEvent(new Event('super-refresh'));
+    setTimeout(() => setBulkMsg(null), 4000);
   };
   const [revertId, setRevertId] = useState('');
   const [revertMsg, setRevertMsg] = useState<string | null>(null);
+  const [critKey, setCritKey] = useState(0);
+  useEffect(() => {
+    const h = () => {
+      try { localStorage.setItem('super_collapse_report-criticals', '1'); } catch { /* ignore */ }
+      setCritKey((k) => k + 1);
+      window.setTimeout(() => document.getElementById('report-criticals')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    };
+    window.addEventListener('super-expand-criticals' as unknown as string, h as EventListener);
+    return () => window.removeEventListener('super-expand-criticals' as unknown as string, h as EventListener);
+  }, []);
   const doRevert = async (id: string) => {
     const target = id || revertId;
     if (!target) return;
@@ -108,19 +140,19 @@ export default function ReportView({
     <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
       {/* KPI row */}
       <div className="kpi-grid">
-        <Kpi label="Proven" value={`${proven}/${total || '—'}`} sub={`${pct}% complete · ${waiting} waiting · ${doing} doing`} color={pct === 100 ? 'var(--green)' : 'var(--fg-0)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>} />
-        <Kpi label="Gate pass rate" value={`${passRate}%`} sub={`${gatePass} pass · ${gateReject} reject · ${totalGates || 0} total`} color={passRate >= 85 ? 'var(--green)' : passRate >= 60 ? 'var(--yellow)' : 'var(--red)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 14A6 6 0 108 2a6 6 0 000 12z" stroke="currentColor" strokeWidth="1.2"/><path d="M5 8h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
-        <Kpi label="Open criticals" value={String(criticals.length)} sub={criticals.length ? 'Needs triage — waivers expire, SAST/sink block writes' : 'All clear — no waivers or sink hits'} color={criticals.length ? 'var(--red)' : 'var(--green)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 3l6 10H2L8 3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M8 7v3M8 11h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>} />
-        <Kpi label="Blocked" value={String(blocked)} sub={`${blocked ? 'Needs unblock · check needs graph' : 'No blocked nodes — DAG is flowing'}`} color={blocked ? 'var(--red)' : 'var(--fg-0)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5.5 5.5l5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
+        <Kpi label="Done" value={`${proven}/${total || '—'}`} sub={`${pct}% finished · ${waiting} waiting · ${doing} in progress`} color={pct === 100 ? 'var(--green)' : 'var(--fg-0)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></svg>} />
+        <Kpi label="Checks passed" value={`${passRate}%`} sub={`${gatePass} passed · ${gateReject} failed · ${totalGates || 0} total`} color={passRate >= 85 ? 'var(--green)' : passRate >= 60 ? 'var(--yellow)' : 'var(--red)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 14A6 6 0 108 2a6 6 0 000 12z" stroke="currentColor" strokeWidth="1.2"/><path d="M5 8h6" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
+        <Kpi label="Open problems" value={String(criticals.length)} sub={criticals.length ? 'Needs a fix or an approved exception' : 'No open problems'} color={criticals.length ? 'var(--red)' : 'var(--green)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 3l6 10H2L8 3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M8 7v3M8 11h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>} />
+        <Kpi label="Blocked" value={String(blocked)} sub={blocked ? 'Waiting on other tasks' : 'Nothing blocked'} color={blocked ? 'var(--red)' : 'var(--fg-0)'} icon={<svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><circle cx="8" cy="8" r="5" stroke="currentColor" strokeWidth="1.2"/><path d="M5.5 5.5l5 5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>} />
       </div>
 
       {/* Provenance + gates */}
-      <Collapsible title="Provenance & gates" className="collapsible-bare" storageKey="report-prov" meta={<span className="mono small muted">{proven}/{total} proven · {passRate}% gate pass</span>}>
+      <Collapsible title="Progress & checks" className="collapsible-bare" storageKey="report-prov" meta={<span className="mono small muted">{proven}/{total} done · {passRate}% checks ok</span>}>
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .8fr', gap: 'var(--space-2)' }}>
         <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>PROVENANCE</span>
-            <span className="mono small" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>{proven} of {total} · leaf-only + fork-per-task</span>
+            <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>PROGRESS</span>
+            <span className="mono small" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>{proven} of {total} done</span>
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center' }}>
             {/* Flat gauge — no conic gradient, solid ring + progress */}
@@ -128,7 +160,7 @@ export default function ReportView({
               <div style={{ width: 68, height: 68, borderRadius: 'var(--radius-full)', background: 'var(--bg-2)', border: `3px solid ${pct === 100 ? 'var(--green)' : 'var(--accent)'}`, display: 'grid', placeItems: 'center' }}>
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 800, letterSpacing: 'var(--tracking-tight)', color: pct === 100 ? 'var(--green)' : 'var(--fg-0)' }}>{pct}<span style={{ fontSize: 'var(--text-xs)', fontWeight: 600, color: 'var(--fg-3)' }}>%</span></div>
-                  <div className="mono" style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>proven</div>
+                  <div className="mono" style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>done</div>
                 </div>
               </div>
             </div>
@@ -149,14 +181,14 @@ export default function ReportView({
                   </div>
                 ))}
               </div>
-              <div className="small muted" style={{ fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' }}>Done-state gate: report shows <span className="mono">done_ok</span> only when every leaf has a proof pointer. Waivers are time-boxed and audited.</div>
+              <div className="small muted" style={{ fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' }}>A task counts as done only when it has a proof note. Temporary exceptions expire and stay visible.</div>
             </div>
           </div>
         </Card>
 
         <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>GATE TREND</span>
+            <span className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>CHECK TREND</span>
             <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)' }}>{totalGates} events</Badge>
           </div>
           {/* sparkline — flat bars */}
@@ -170,7 +202,7 @@ export default function ReportView({
             <Badge variant={gateReject ? 'blocked' : 'neutral'} style={{ fontSize: 'var(--text-xs)' }}>{gateReject} reject</Badge>
             <span className="mono small muted" style={{ marginLeft: 'auto', alignSelf: 'center' }}>{passRate}% pass</span>
           </div>
-          <div className="small muted" style={{ fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' }}>Catch-rate is per-gate (grounding, duplication, mutation…) — see breakdown below. Fatigued reviewers are escalated.</div>
+          <div className="small muted" style={{ fontSize: 'var(--text-xs)', lineHeight: 'var(--leading-normal)' }}>Each check type (symbols, duplicates, risky changes…) is tracked separately below.</div>
         </Card>
       </div>
       </Collapsible>
@@ -178,16 +210,33 @@ export default function ReportView({
       {/* Task table — virtualized + density controls */}
       <Card style={{ overflow: 'hidden' }}>
         <CardHead>
-          <h3><svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M3 5h10M3 8h6M3 11h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg> Tasks · provenance ledger</h3>
-          <span style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
-            <span className="head-meta mono">{proven}/{total} proven · {selected.size ? `${selected.size} selected` : 'tap row to copy'}</span>
-            <Button size="sm" variant="ghost" onClick={selectAll}>{selected.size === tasks.length ? 'clear' : 'all'}</Button>
-            {selected.size > 0 && <Button size="sm" variant="primary" onClick={bulkApprove}>bulk approve</Button>}
-            <Button size="sm" variant="default" onClick={exportCsv}>export CSV</Button>
-            <input value={revertId} onChange={e=> setRevertId(e.target.value)} placeholder="revert to id" style={{ width: 90, fontSize: 'var(--text-xs)', padding: '4px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-1)', fontFamily: 'var(--font-mono)' }} />
-            <Button size="sm" variant="default" onClick={()=> void doRevert('')}>revert</Button>
+          <h3>All tasks</h3>
+          <span style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+            <span className="head-meta mono">{proven}/{total} done · {selected.size ? `${selected.size} selected` : 'select rows to act'}</span>
+            <Button size="sm" variant="ghost" onClick={selectAll}>{selected.size === tasks.length ? 'Clear' : 'Select all'}</Button>
+            {selected.size > 0 && (
+              <>
+                <input
+                  value={bulkNote}
+                  onChange={(e) => setBulkNote(e.target.value)}
+                  placeholder="Proof note for selected…"
+                  aria-label="Proof note for bulk approve"
+                  style={{ width: 180, fontSize: 'var(--text-xs)', padding: '4px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-1)', color: 'var(--fg-1)' }}
+                />
+                <Button size="sm" variant="primary" disabled={bulkBusy} onClick={() => void bulkApprove()}>{bulkBusy ? 'Working…' : 'Mark selected done'}</Button>
+              </>
+            )}
+            <Button size="sm" variant="default" onClick={exportCsv}>Export CSV</Button>
+            <input value={revertId} onChange={e=> setRevertId(e.target.value)} placeholder="Undo to id" aria-label="Task id to undo from" style={{ width: 90, fontSize: 'var(--text-xs)', padding: '4px 6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-1)', fontFamily: 'var(--font-mono)', color: 'var(--fg-1)' }} />
+            <Button size="sm" variant="default" onClick={()=> void doRevert('')}>Undo</Button>
           </span>
         </CardHead>
+        {(bulkMsg || revertMsg) && (
+          <div style={{ padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border-subtle)' }}>
+            {bulkMsg && <Alert variant={bulkMsg.startsWith('Done') || bulkMsg.startsWith('Marked') ? 'success' : 'warning'} style={{ fontSize: 'var(--text-xs)' }}>{bulkMsg}</Alert>}
+            {revertMsg && <Alert variant="success" style={{ fontSize: 'var(--text-xs)' }}>{revertMsg}</Alert>}
+          </div>
+        )}
         <div style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-1)', padding: '1px var(--space-1)' }}>
           <Collapsible title="Columns" className="collapsible-bare" compact defaultOpen={false} meta={<span className="mono small muted">{Object.values(cols).filter(Boolean).length}/5 shown</span>}>
             <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap', paddingBottom: 'var(--space-2)' }}>
@@ -213,13 +262,12 @@ export default function ReportView({
                 {cols.status && <th>STATUS</th>}
                 {cols.why && <th>WHY</th>}
                 {cols.proof && <th>PROOF</th>}
-                <th style={{ width: 60 }}>REVERT</th>
+                <th style={{ width: 60 }}>UNDO</th>
               </tr>
             </thead>
             <tbody>
-              {revertMsg && <tr><td colSpan={7} style={{ padding: 'var(--space-2)' }}><Alert variant="success" style={{ fontSize: 'var(--text-xs)' }}>{revertMsg}</Alert></td></tr>}
               {tasks.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--fg-3)' }}>No tasks — <code>python3 -m super.cli task-add "Title" --done "check"</code></td></tr>
+                <tr><td colSpan={7} style={{ textAlign: 'center', padding: 'var(--space-8)', color: 'var(--fg-3)' }}>No tasks yet</td></tr>
               ) : (
                 <>
                   {virt.start > 0 && <tr style={{ height: virt.offset }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
@@ -231,7 +279,7 @@ export default function ReportView({
                       {cols.status && <td><StatusBadge status={t.status} /></td>}
                       {cols.why && <td style={{ maxWidth: 220, color: 'var(--fg-2)', fontSize: 'var(--text-sm)' }}><span className="truncate" title={t.why}>{t.why || '—'}</span></td>}
                       {cols.proof && <td style={{ maxWidth: 240 }}>{t.proof ? <code className="mono" style={{ fontSize: 'var(--text-xs)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block' }}>{t.proof}</code> : <span className="muted" style={{ fontStyle: 'italic', fontSize: 'var(--text-sm)' }}>—</span>}</td>}
-                      <td><Button size="sm" variant="ghost" onClick={(e)=> { e.stopPropagation(); void doRevert(t.id); }} style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }}>revert</Button></td>
+                      <td><Button size="sm" variant="ghost" onClick={(e)=> { e.stopPropagation(); void doRevert(t.id); }} style={{ fontSize: 'var(--text-xs)', padding: '2px 6px' }}>Undo</Button></td>
                     </tr>
                   ))}
                   {virt.end < tasks.length && <tr style={{ height: virt.total - virt.offset - (virt.end - virt.start) * rowH }}><td colSpan={7} style={{ padding: 0, border: 'none' }} /></tr>}
@@ -241,13 +289,13 @@ export default function ReportView({
           </table>
         </div>
         <div className="small muted" style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: 'var(--space-2)' }}>
-          <span className="mono">{tasks.length} rows · virtualized {virt.start}-{virt.end}</span>
-          <span style={{ marginLeft: 'auto' }} className="mono">density: {rowH}px row · CSV · bulk</span>
+          <span className="mono">{tasks.length} rows</span>
+          <span style={{ marginLeft: 'auto' }} className="mono">CSV · select to act</span>
         </div>
       </Card>
 
       {/* Gate breakdown */}
-      <Collapsible title="Gate breakdown" storageKey="report-gates" compact meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>{Object.keys(gates).length} gates · best-of-5 + early-abort</span>}>
+      <Collapsible title="Checks by type" storageKey="report-gates" compact meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>{Object.keys(gates).length} types</span>}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 'var(--space-2)' }}>
           {Object.entries(gates).map(([gate, s]) => {
             const tot = s.pass + s.reject;
@@ -263,21 +311,21 @@ export default function ReportView({
               </div>
             );
           })}
-          {Object.keys(gates).length === 0 && <div className="small muted" style={{ padding: 'var(--space-3)', background: 'var(--bg-1)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>No gate events yet — chat or write to generate telemetry</div>}
+          {Object.keys(gates).length === 0 && <div className="small muted" style={{ padding: 'var(--space-3)', background: 'var(--bg-1)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>No check results yet — chat or run work to generate them</div>}
         </div>
       </Collapsible>
 
       {/* Security substrate — SBOM, sink, waivers, checklist (doc 02 §6, 03 §5) */}
       <Collapsible
-        title="Security substrate"
+        title="Packages & safety"
         storageKey="report-sec"
         defaultOpen={false}
         compact
-        meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>SBOM {sbom?.count ?? 0} · sink {sink?.entries ?? 0} · waivers {waivers.length}</span>}
+        meta={<span className="mono small muted" style={{ fontSize: 'var(--text-xs)' }}>{sbom?.count ?? 0} packages · {waivers.length} exceptions</span>}
       >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 'var(--space-2)' }}>
         <Card style={{ padding: 'var(--space-3)' }}>
-          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>SBOM — {sbom?.count ?? 0} packages</div>
+          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>PACKAGES — {sbom?.count ?? 0}</div>
           {sbom && sbom.packages.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 140, overflow: 'auto' }}>
               {sbom.packages.slice(0, 8).map((p) => (
@@ -288,26 +336,26 @@ export default function ReportView({
               {sbom.count > 8 && <span className="small muted">+{sbom.count - 8} more</span>}
             </div>
           ) : (
-            <div className="small muted">No SBOM yet — run any task to generate from lockfiles</div>
+            <div className="small muted">No package list yet</div>
           )}
         </Card>
         <Card style={{ padding: 'var(--space-3)' }}>
-          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>SINK AUDIT — {sink?.entries ?? 0} entries</div>
+          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>NETWORK SAFETY</div>
           {sink ? (
-            sink.clean ? <Badge variant="proven">clean — no untrusted network-out</Badge> : <Badge variant="blocked">{sink.violations.length} violations</Badge>
+            sink.clean ? <Badge variant="proven">clean</Badge> : <Badge variant="blocked">{sink.violations.length} issues</Badge>
           ) : (
             <span className="small muted">Loading…</span>
           )}
           {sink && sink.violations.length > 0 && (
             <div style={{ marginTop: 'var(--space-2)', display: 'flex', flexDirection: 'column', gap: 4 }}>
               {(sink.violations as Array<{ kind: string; target: string; taint: string }>).slice(0, 3).map((v, i) => (
-                <div key={i} className="mono" style={{ fontSize: 'var(--text-xs)', padding: '4px 8px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-xs)', color: 'var(--red)' }}>{v.kind} → {v.target} [{v.taint}]</div>
+                <div key={i} className="mono" style={{ fontSize: 'var(--text-xs)', padding: '4px 8px', background: 'var(--red-bg)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-xs)', color: 'var(--red)' }}>{v.kind} → {v.target}</div>
               ))}
             </div>
           )}
         </Card>
         <Card style={{ padding: 'var(--space-3)' }}>
-          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>REVIEWER CHECKLIST — mined</div>
+          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>REVIEW TIPS</div>
           {checklist.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               {checklist.slice(0, 6).map((c) => (
@@ -315,19 +363,19 @@ export default function ReportView({
               ))}
             </div>
           ) : (
-            <span className="small muted">No rejections yet — checklist learns from past rejections</span>
+            <span className="small muted">Tips appear after past review failures</span>
           )}
         </Card>
         <Card style={{ padding: 'var(--space-3)' }}>
-          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>WAIVERS — {waivers.length} open</div>
+          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-2)' }}>EXCEPTIONS — {waivers.length} open</div>
           {waivers.length ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 140, overflow: 'auto' }}>
               {(waivers as Array<{ text?: string; expires?: string }>).slice(0, 4).map((w, i) => (
-                <div key={i} className="mono" style={{ fontSize: 'var(--text-xs)', padding: '6px 8px', background: 'var(--yellow-bg)', border: '1px solid var(--yellow-border)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)' }}>{String((w as { text?: string }).text || JSON.stringify(w)).slice(0, 80)}{(w as { expires?: string }).expires ? ` → ${ (w as { expires?: string }).expires}` : ''}</div>
+                <div key={i} className="mono" style={{ fontSize: 'var(--text-xs)', padding: '6px 8px', background: 'var(--yellow-bg)', border: '1px solid var(--yellow-border)', borderRadius: 'var(--radius-xs)', color: 'var(--yellow)' }}>{String((w as { text?: string }).text || JSON.stringify(w)).slice(0, 80)}{(w as { expires?: string }).expires ? ` → ${(w as { expires?: string }).expires}` : ''}</div>
               ))}
             </div>
           ) : (
-            <Badge variant="proven">no waivers — done-state unblocked</Badge>
+            <Badge variant="proven">none open</Badge>
           )}
         </Card>
       </div>
@@ -335,12 +383,14 @@ export default function ReportView({
 
       {/* Criticals */}
       {criticals.length > 0 && (
+        <div id="report-criticals" key={critKey}>
         <Collapsible
-          title={`Open criticals — ${criticals.length}`}
+          title={`Open problems — ${criticals.length}`}
           storageKey="report-criticals"
           compact
+          defaultOpen
           badge={<Badge variant="blocked" style={{ fontSize: 'var(--text-2xs)' }}>{criticals.length}</Badge>}
-          meta={<span className="mono small" style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>require waiver or fix</span>}
+          meta={<span className="mono small" style={{ color: 'var(--red)', fontSize: 'var(--text-xs)' }}>fix or approve an exception</span>}
           style={{ borderColor: 'var(--red-border)' }}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
@@ -348,18 +398,18 @@ export default function ReportView({
               <div key={i} style={{ padding: 'var(--space-2) var(--space-3)', background: 'var(--bg-1)', border: '1px solid var(--red-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--text-base)', color: 'var(--fg-1)', display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start' }}>
                 <span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: 'var(--red)', marginTop: 7, flexShrink: 0 }} aria-hidden />
                 <span style={{ flex: 1, lineHeight: 'var(--leading-normal)' }}>{c.text || c.layer || c.message || JSON.stringify(c)}</span>
-                <Badge variant="blocked" style={{ fontSize: 'var(--text-2xs)' }}>{c.severity || 'critical'}</Badge>
+                <Badge variant="blocked" style={{ fontSize: 'var(--text-2xs)' }}>{c.severity || 'problem'}</Badge>
               </div>
             ))}
           </div>
         </Collapsible>
+        </div>
       )}
 
       <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', fontSize: 'var(--text-xs)', color: 'var(--fg-3)', padding: 'var(--space-1) var(--space-1)' }}>
-        <span className="mono">SUPER v1.0 · all gates enforced</span>
+        <span className="mono">SUPER v1.0</span>
         <span aria-hidden>·</span>
-        <span>Ledger: <code style={{ fontSize: 'var(--text-2xs)' }}>.super/gate.log.jsonl</code></span>
-        <span style={{ marginLeft: 'auto' }} className="mono">envelope · Best-of-5 · stall 3</span>
+        <span>Log: <code style={{ fontSize: 'var(--text-2xs)' }}>.super/gate.log.jsonl</code></span>
       </div>
     </div>
   );

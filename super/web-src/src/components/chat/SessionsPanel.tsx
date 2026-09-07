@@ -9,30 +9,79 @@ type Props = {
   filtered: SessionSummary[];
   activeId: string | null;
   filter: string;
+  busy?: boolean;
+  selectMode: boolean;
+  selectedIds: Set<string>;
   onFilter: (v: string) => void;
   onNewChat: () => void;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string | null) => void;
+  onToggleSelectMode: () => void;
+  onToggleSelected: (id: string) => void;
+  onSelectAllFiltered: () => void;
+  onClearSelection: () => void;
+  onDeleteSelected: () => void;
 };
 
-export function SessionsPanel({ sessions, filtered, activeId, filter, onFilter, onNewChat, onSelect, onDelete, onRename }: Props) {
+export function SessionsPanel({
+  sessions, filtered, activeId, filter, busy,
+  selectMode, selectedIds,
+  onFilter, onNewChat, onSelect, onDelete, onRename,
+  onToggleSelectMode, onToggleSelected, onSelectAllFiltered, onClearSelection, onDeleteSelected,
+}: Props) {
+  const nSel = selectedIds.size;
   return (
-    <Card style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-      <div style={{ padding: 'var(--space-2)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+    <Card className="sessions-panel">
+      <div className="sessions-panel-head">
         <Button variant="primary" size="sm" block onClick={onNewChat} style={{ justifyContent: 'center' }}>
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           New chat
         </Button>
         <div style={{ position: 'relative' }}>
           <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-4)', pointerEvents: 'none' }} aria-hidden><circle cx="7" cy="7" r="4" stroke="currentColor" strokeWidth="1.2"/><path d="M10 10l2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
-          <Input value={filter} onChange={(e) => onFilter(e.target.value)} placeholder="Filter chats… /" style={{ paddingLeft: 28, fontSize: 'var(--text-sm)', background: 'var(--bg-1)' }} aria-label="Filter chats" />
+          <Input value={filter} onChange={(e) => onFilter(e.target.value)} placeholder="Filter chats…" style={{ paddingLeft: 28, fontSize: 'var(--text-sm)', background: 'var(--bg-1)' }} aria-label="Filter chats" />
+        </div>
+        <div className="sessions-panel-toolbar">
+          <Button size="sm" variant={selectMode ? 'primary' : 'ghost'} onClick={onToggleSelectMode}>
+            {selectMode ? 'Done' : 'Select'}
+          </Button>
+          {selectMode && (
+            <>
+              <Button size="sm" variant="ghost" onClick={onSelectAllFiltered} disabled={!filtered.length}>
+                All
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onClearSelection} disabled={!nSel}>
+                None
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={!nSel}
+                onClick={() => {
+                  if (confirm(`Delete ${nSel} chat${nSel !== 1 ? 's' : ''}? This cannot be undone.`)) onDeleteSelected();
+                }}
+              >
+                Delete{nSel ? ` (${nSel})` : ''}
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 'var(--space-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+      <div className="sessions-panel-list" role="list" aria-label="Chat list">
         {filtered.map((s) => (
-          <SessionRow key={s.id} s={s} active={s.id === activeId} onSelect={() => onSelect(s.id)} onDelete={() => onDelete(s.id)} onRename={(t) => onRename(s.id, t)} />
+          <SessionRow
+            key={s.id}
+            s={s}
+            active={s.id === activeId}
+            selectMode={selectMode}
+            selected={selectedIds.has(s.id)}
+            onSelect={() => onSelect(s.id)}
+            onToggleSelect={() => onToggleSelected(s.id)}
+            onDelete={() => onDelete(s.id)}
+            onRename={(t) => onRename(s.id, t)}
+          />
         ))}
         {filtered.length === 0 && (
           <div className="empty" style={{ padding: 'var(--space-4)' }}>
@@ -42,9 +91,12 @@ export function SessionsPanel({ sessions, filtered, activeId, filter, onFilter, 
         )}
       </div>
 
-      <div style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-1)', display: 'flex', alignItems: 'center', gap: 'var(--space-2)', fontSize: 'var(--text-xs)', color: 'var(--fg-3)' }}>
-        <span className="mono">{sessions.length} sessions</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}><span style={{ width: 6, height: 6, borderRadius: 'var(--radius-full)', background: 'var(--green)', display: 'inline-block' }} aria-hidden /> grounded</span>
+      <div className="sessions-panel-foot panel-foot">
+        <span className="mono">{sessions.length} chat{sessions.length !== 1 ? 's' : ''}{nSel ? ` · ${nSel} selected` : ''}</span>
+        <span className="sessions-panel-status">
+          <span className="dot" style={{ background: busy ? 'var(--yellow)' : 'var(--green)' }} aria-hidden />
+          {busy ? 'writing…' : 'ready'}
+        </span>
       </div>
     </Card>
   );

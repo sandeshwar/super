@@ -4,7 +4,7 @@
  * Robust error handling via typed errors, never leaks raw stack to UI.
  */
 import type { GateInfo, Session, SessionSummary, TaskNode } from './types';
-import { ApiError, NetworkError, StreamError, ValidationError } from './lib/errors';
+import { AbortError, ApiError, NetworkError, StreamError, ValidationError } from './lib/errors';
 import type { IApiService } from './services/api.types';
 
 // ── Token storage abstraction (DIP) ──
@@ -29,12 +29,29 @@ class SessionTokenStore implements TokenStore {
 }
 const tokenStore: TokenStore = new SessionTokenStore();
 
+/** Persist bearer token (also picks up ?token= on first get). */
+export function setAuthToken(token: string): void {
+  tokenStore.set((token || '').trim());
+}
+export function getAuthToken(): string {
+  return tokenStore.get();
+}
+export function hasAuthToken(): boolean {
+  return Boolean(tokenStore.get());
+}
+
+export type StreamChatOpts = {
+  signal?: AbortSignal;
+  skipUserAppend?: boolean;
+  onEvent?: (ev: Record<string, unknown>) => void;
+};
+
 // ── HTTP transport (SRP) ──
 type HttpMethod = 'GET' | 'POST' | 'DELETE';
 class HttpClient {
   private store: TokenStore;
   private timeoutMs: number;
-  constructor(store: TokenStore, timeoutMs = 30_000) {
+  constructor(store: TokenStore, timeoutMs = 125_000) {
     this.store = store;
     this.timeoutMs = timeoutMs;
   }
@@ -133,6 +150,10 @@ class ApiService implements IApiService {
     requireNonEmpty(proof, 'proof');
     return http.request<{ ok: boolean }>('/api/prove', 'POST', { id, proof });
   }
+  addTask(title: string, done = '') {
+    requireNonEmpty(title, 'title');
+    return http.request<{ ok: boolean; id: string; task?: unknown }>('/api/task', 'POST', { title, done });
+  }
   approve(id: string, note: string) {
     requireId(id);
     return http.request<{ ok: boolean }>('/api/approve', 'POST', { id, note: note || 'approved' });
@@ -141,25 +162,47 @@ class ApiService implements IApiService {
     requireId(id);
     return http.request<{ ok: boolean }>('/api/send-back', 'POST', { id, note: note || 'needs work' });
   }
-  async streamChat(sessionId: string | null, message: string, onDelta: (d: string) => void) {
+  async streamChat(
+    sessionId: string | null,
+    message: string,
+    onDelta: (d: string) => void,
+    onEventOrOpts?: ((ev: Record<string, unknown>) => void) | StreamChatOpts,
+  ) {
     requireNonEmpty(message, 'message');
-    return streamChatImpl(sessionId, message, onDelta, tokenStore);
+    const opts: StreamChatOpts =
+      typeof onEventOrOpts === 'function' ? { onEvent: onEventOrOpts } : (onEventOrOpts || {});
+    return streamChatImpl(sessionId, message, onDelta, tokenStore, opts);
   }
+  getTools() { return http.request<{ tools: Record<string, unknown> }>('/api/tools', 'GET'); }
   sbom() { return http.request<{ packages: { name: string; version: string }[]; count: number }>('/api/sbom', 'GET'); }
   sink() { return http.request<{ entries: number; violations: unknown[]; clean: boolean }>('/api/sink', 'GET'); }
   checklist() { return http.request<{ checklist: string[] }>('/api/checklist', 'GET'); }
   waivers() { return http.request<{ waivers: unknown[] }>('/api/waivers', 'GET'); }
+  diff(opts: { id?: string; paths?: string[] } = {}) {
+    const qs = new URLSearchParams();
+    if (opts.id) qs.set('id', opts.id);
+    for (const p of opts.paths || []) qs.append('path', p);
+    const q = qs.toString();
+    return http.request<{ ok: boolean; diff: string; paths: string[]; empty: boolean; error?: string | null }>(
+      `/api/diff${q ? `?${q}` : ''}`,
+      'GET',
+    );
+  }
   spec(id: string) { requireId(id); return http.request<{ task: import('./types').TaskNode; spec: { acceptance: string[]; pinned: boolean } }>(`/api/spec?id=${encodeURIComponent(id)}`, 'GET'); }
   pinSpec(id: string, acceptance: string[]) {
     requireId(id);
     if (!acceptance.length) throw new Error('acceptance criteria required');
     return http.request<{ ok: boolean; spec: { acceptance: string[]; pinned: boolean } }>('/api/spec/pin', 'POST', { id, acceptance });
   }
-  models() { return http.request<{ models: string[]; current: string }>('/api/models', 'GET'); }
-  setModel(model: string) { requireNonEmpty(model, 'model'); return http.request<{ ok: boolean; model: string }>('/api/model', 'POST', { model }); }
+  models() { return http.request<{ models: string[]; current: string; context_length?: number | null }>('/api/models', 'GET'); }
+  setModel(model: string) { requireNonEmpty(model, 'model'); return http.request<{ ok: boolean; model: string; context_length?: number | null }>('/api/model', 'POST', { model }); }
   workspace() { return http.request<{ workspace: string; state_dir: string; config_path: string | null }>('/api/workspace', 'GET'); }
   setWorkspace(path: string) { requireNonEmpty(path, 'path'); return http.request<{ ok: boolean; workspace: string }>('/api/workspace', 'POST', { path }); }
   reload() { return http.request<{ ok: boolean; workspace: string; model: string }>('/api/reload', 'POST', {}); }
+  getConfig() { return http.request<{ config: Record<string, unknown> }>('/api/config', 'GET'); }
+  updateConfig(patch: Record<string, unknown>) {
+    return http.request<{ ok: boolean; config: Record<string, unknown> }>('/api/config', 'POST', patch);
+  }
   deleteSession(id: string) { requireId(id); return http.request<{ ok: boolean }>(`/api/session?id=${encodeURIComponent(id)}`, 'DELETE'); }
   renameSession(id: string, title?: string | null) {
     requireId(id);
@@ -188,28 +231,44 @@ async function streamChatImpl(
   message: string,
   onDelta: (d: string) => void,
   store: TokenStore,
+  opts: StreamChatOpts = {},
 ): Promise<{ session_id: string; gate: GateInfo }> {
   if (!onDelta || typeof onDelta !== 'function') throw new ValidationError('onDelta callback required');
   const t = store.get();
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 120_000);
+  const external = opts.signal;
+  const onExternalAbort = () => controller.abort();
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', onExternalAbort, { once: true });
+  }
+  const timeout = window.setTimeout(() => controller.abort(), 300_000);
 
   let res: Response;
   try {
     res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) },
-      body: JSON.stringify({ session_id: sessionId, message }),
+      body: JSON.stringify({
+        session_id: sessionId,
+        message,
+        ...(opts.skipUserAppend ? { skip_user_append: true } : {}),
+      }),
       signal: controller.signal,
     });
   } catch (e) {
     window.clearTimeout(timeout);
-    if ((e as Error).name === 'AbortError') throw new NetworkError('Stream timed out', e);
+    if (external) external.removeEventListener('abort', onExternalAbort);
+    if ((e as Error).name === 'AbortError') {
+      if (external?.aborted) throw new AbortError('Stream stopped', e);
+      throw new NetworkError('Stream timed out', e);
+    }
     throw new NetworkError((e as Error).message, e);
   }
 
   if (!res.ok || !res.body) {
     window.clearTimeout(timeout);
+    if (external) external.removeEventListener('abort', onExternalAbort);
     const msg = await res.text().catch(() => `${res.status} ${res.statusText}`);
     let parsed = msg;
     try { const j = JSON.parse(msg); parsed = j.error || j.message || msg; } catch { /* keep raw */ }
@@ -239,7 +298,18 @@ async function streamChatImpl(
           } catch (e) {
             throw new StreamError('Invalid stream frame', e);
           }
-          const o = evt as { delta?: string; done?: boolean; session_id?: string; gate?: GateInfo };
+          const o = evt as {
+            delta?: string;
+            done?: boolean;
+            session_id?: string;
+            gate?: GateInfo;
+            tool_call?: unknown;
+            tool_result?: unknown;
+            llm_stats?: unknown;
+            error?: string;
+          };
+          if (o.error) throw new StreamError(o.error);
+          opts.onEvent?.(o as Record<string, unknown>);
           if (typeof o.delta === 'string' && o.delta) onDelta(o.delta);
           if (o.done) {
             if (!o.session_id || !o.gate) throw new StreamError('Malformed done frame');
@@ -251,10 +321,15 @@ async function streamChatImpl(
       if (done && buf.length === 0) break;
     }
   } catch (e) {
-    if (e instanceof StreamError || e instanceof ApiError) throw e;
+    if ((e as Error).name === 'AbortError') {
+      if (external?.aborted) throw new AbortError('Stream stopped', e);
+      throw new NetworkError('Stream timed out', e);
+    }
+    if (e instanceof StreamError || e instanceof ApiError || e instanceof AbortError) throw e;
     throw new StreamError((e as Error).message || 'Stream failed', e);
   } finally {
     window.clearTimeout(timeout);
+    if (external) external.removeEventListener('abort', onExternalAbort);
     try { reader.releaseLock(); } catch { /* ignore */ }
   }
 
@@ -267,6 +342,9 @@ export async function streamChat(
   sessionId: string | null,
   message: string,
   onDelta: (d: string) => void,
+  onEventOrOpts?: ((ev: Record<string, unknown>) => void) | StreamChatOpts,
 ): Promise<{ session_id: string; gate: GateInfo }> {
-  return streamChatImpl(sessionId, message, onDelta, tokenStore);
+  const opts: StreamChatOpts =
+    typeof onEventOrOpts === 'function' ? { onEvent: onEventOrOpts } : (onEventOrOpts || {});
+  return streamChatImpl(sessionId, message, onDelta, tokenStore, opts);
 }

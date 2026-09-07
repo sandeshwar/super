@@ -47,13 +47,20 @@ export class StreamError extends AppError {
   }
 }
 
+export class AbortError extends AppError {
+  constructor(message = 'Aborted', cause?: unknown) {
+    super(message, 'ABORT', cause);
+    this.name = 'AbortError';
+  }
+}
+
 /**
  * Parse unknown throw into AppError without leaking internals.
  * Never shows stack to user — maps to safe message.
  */
 export function toAppError(e: unknown): AppError {
   if (e instanceof AppError) return e;
-  if (e instanceof DOMException && e.name === 'AbortError') return new NetworkError('Request timed out', e);
+  if (e instanceof DOMException && e.name === 'AbortError') return new AbortError('Request aborted', e);
   if (e instanceof TypeError && /fetch|network/i.test(e.message)) return new NetworkError(e.message, e);
   if (e instanceof Error) return new AppError(e.message, 'UNKNOWN', e);
   return new AppError(String(e), 'UNKNOWN', e);
@@ -61,8 +68,9 @@ export function toAppError(e: unknown): AppError {
 
 export function userMessage(e: unknown): string {
   const err = toAppError(e);
+  if (err instanceof AbortError) return 'Stopped';
   if (err instanceof ApiError) {
-    if (err.isAuth) return 'Unauthorized — token missing or expired. Open the dashboard URL with ?token=';
+    if (err.isAuth) return 'Sign-in needed — paste the access token from your SUPER start URL.';
     if (err.isNotFound) return err.message || 'Not found';
     if (err.isServer) return 'Server error — check the backend logs';
     return err.message;

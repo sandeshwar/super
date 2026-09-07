@@ -35,6 +35,7 @@ def repo_overview(cfg: dict, limit: int = 60) -> str:
 
 def build_system(cfg: dict) -> str:
     from . import memory, tasks
+    from .tools.runtime import tools_system_addon
 
     leaf = tasks.leaf(cfg)
     leaf_txt = tasks.render_leaf(leaf)
@@ -50,6 +51,7 @@ def build_system(cfg: dict) -> str:
         f"Current task card (your one job):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
         f"Repo top level: {repo_overview(cfg)}"
+        f"{tools_system_addon(cfg)}"
     )
 
 
@@ -98,7 +100,7 @@ def _score_reply(cfg: dict, reply: str) -> tuple[float, dict]:
 
 
 def answer(cfg: dict, session_id: str, user_text: str) -> tuple[str, dict]:
-    """Full pipeline: context -> model -> grounding check -> persist."""
+    """Full pipeline: context -> (tools) model -> grounding check -> persist."""
     from . import llm, sessions
 
     if not (user_text or "").strip():
@@ -110,6 +112,18 @@ def answer(cfg: dict, session_id: str, user_text: str) -> tuple[str, dict]:
             messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": user_text})
     sessions.append(cfg, session_id, "user", user_text)
+
+    tools_on = bool((cfg.get("tools") or {}).get("enabled", True))
+    if tools_on:
+        from .tools.runtime import run_agent
+        reply, _, meta = run_agent(cfg, messages)
+        gate = check_reply(cfg, reply)
+        if isinstance(gate, dict):
+            gate = {**gate, "agent": {k: v for k, v in meta.items() if k != "events"}}
+        # Persist UI tool trace (same shape as /api/chat/stream)
+        events = meta.get("events") if isinstance(meta, dict) else None
+        sessions.append(cfg, session_id, "assistant", reply, gate=gate, tools=events or None)
+        return reply, gate
 
     n = max(1, int(cfg.get("envelope", {}).get("best_of_n", 1)))
     stall = max(1, int(cfg.get("envelope", {}).get("early_abort_stall", 3)))

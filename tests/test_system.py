@@ -138,6 +138,8 @@ class TestHarness(unittest.TestCase):
 
         cfg, root = make_cfg()
         try:
+            # Force non-agent path so the stubbed llm.chat is used.
+            cfg.setdefault("tools", {})["enabled"] = False
             llm.chat = lambda cfg, messages: "done, see `os`"
             sid = sessions.create(cfg, "t")
             reply, gate = H.answer(cfg, sid, "hi")

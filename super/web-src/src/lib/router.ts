@@ -17,7 +17,7 @@ import {
   type ReactNode,
 } from 'react';
 
-export type View = 'chat' | 'tree' | 'approve' | 'report';
+export type View = 'chat' | 'tree' | 'approve' | 'report' | 'settings';
 
 export type TreeFilter = 'all' | 'waiting' | 'doing' | 'proven' | 'blocked';
 export type TreeSort = 'id' | 'status';
@@ -26,9 +26,10 @@ export type Route =
   | { view: 'chat'; sessionId: string | null }
   | { view: 'tree'; taskId: string | null; q: string; status: TreeFilter; sort: TreeSort }
   | { view: 'approve'; taskId: string | null }
-  | { view: 'report' };
+  | { view: 'report' }
+  | { view: 'settings' };
 
-const VIEWS = new Set<View>(['chat', 'tree', 'approve', 'report']);
+const VIEWS = new Set<View>(['chat', 'tree', 'approve', 'report', 'settings']);
 const TREE_STATUS = new Set<TreeFilter>(['all', 'waiting', 'doing', 'proven', 'blocked']);
 const TREE_SORT = new Set<TreeSort>(['id', 'status']);
 const ROUTE_QUERY = new Set(['q', 'status', 'sort']);
@@ -84,6 +85,7 @@ export function parsePath(pathname: string, search = ''): Route {
   }
   if (view === 'approve') return { view: 'approve', taskId: id };
   if (view === 'report') return { view: 'report' };
+  if (view === 'settings') return { view: 'settings' };
   return { view: 'chat', sessionId: id };
 }
 

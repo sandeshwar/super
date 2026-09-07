@@ -123,9 +123,9 @@ class Handler(BaseHTTPRequestHandler):
         return json_i < 0 or html_i < json_i
 
     def _is_spa_path(self, path: str) -> bool:
-        if path in ("/", "/chat", "/tree", "/approve", "/report"):
+        if path in ("/", "/chat", "/tree", "/approve", "/report", "/settings"):
             return True
-        for prefix in ("/chat/", "/tree/", "/approve/", "/report/"):
+        for prefix in ("/chat/", "/tree/", "/approve/", "/report/", "/settings/"):
             if path.startswith(prefix):
                 return True
         return False
@@ -163,13 +163,18 @@ class Handler(BaseHTTPRequestHandler):
         if u.path in ("/report", "/api/report"):
             return self._send_json(_report(CFG))
         if u.path in ("/job", "/api/job"):
+            from .errors import TaskNotFound
             node_id = (q.get("id", [""])[0] or "").strip()
             if not node_id:
                 return self._send_json({"error": "missing ?id=", "code": 400}, 400)
             try:
                 return self._send_json(tasks.get(CFG, node_id))
-            except KeyError:
+            except (KeyError, TaskNotFound):
                 return self._send_json({"error": "no such task", "code": 404}, 404)
+        if u.path in ("/approve",) and not self._prefers_html():
+            # Bare /approve API alias (doc 06): pending review candidates as JSON.
+            waiting = [t for t in tasks.list_all(CFG) if t.get("status") in ("waiting", "doing")]
+            return self._send_json({"pending": waiting, "count": len(waiting)})
         if u.path == "/api/metrics":
             return self._send_json({"tasks": tasks.stats(CFG), "ledger": ledger.report(CFG),
                                     "fatigue": trust.fatigue(CFG), "sink": sec.sink_audit(CFG)})
@@ -189,10 +194,62 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/models":
             from . import llm as _llm
             models = _llm.list_models(CFG)
-            return self._send_json({"models": models, "current": CFG["llm"]["model"]})
+            ctx = _llm.model_context_length(CFG)
+            return self._send_json({
+                "models": models,
+                "current": CFG["llm"]["model"],
+                "context_length": ctx,
+            })
         if u.path == "/api/workspace":
             return self._send_json({"workspace": CFG.get("_root",""), "state_dir": CFG.get("state_dir",""), "config_path": CFG.get("_config_path")})
+        if u.path == "/api/config":
+            from . import config as _cfg
+            return self._send_json({"config": _cfg.public_view(CFG)})
+        if u.path == "/api/tools":
+            from .tools.catalog import catalog_public
+            return self._send_json({"tools": catalog_public(CFG)})
+        if u.path == "/api/diff":
+            # Review surface: git diff for task files. Empty paths → no whole-repo dump.
+            paths = [p for p in (q.get("path", []) or []) if str(p).strip()]
+            tid = (q.get("id", [""])[0] or "").strip()
+            if tid and not paths:
+                try:
+                    from .errors import TaskNotFound as _TNF
+                    node = tasks.get(CFG, tid)
+                    paths = [str(f) for f in (node.get("files") or []) if str(f).strip()]
+                except Exception:
+                    paths = []
+            if not paths:
+                return self._send_json({
+                    "ok": True, "diff": "", "paths": [], "empty": True,
+                    "error": None,
+                })
+            from .tools.builtins import git_diff
+            chunks = []
+            last_err = ""
+            for p in paths[:40]:
+                r = git_diff(CFG, {"path": p})
+                if r.ok and (r.content or "").strip():
+                    chunks.append(r.content)
+                elif not r.ok:
+                    last_err = r.content or "git diff failed"
+            text = "\n".join(chunks)
+            if not text.strip():
+                # try staged for the same paths
+                for p in paths[:40]:
+                    r = git_diff(CFG, {"path": p, "staged": True})
+                    if r.ok and (r.content or "").strip():
+                        chunks.append(r.content)
+                text = "\n".join(chunks)
+            return self._send_json({
+                "ok": True if text.strip() or not last_err else False,
+                "diff": text or "",
+                "paths": paths,
+                "empty": not bool((text or "").strip()),
+                "error": None if text.strip() or not last_err else last_err,
+            })
         if u.path == "/api/spec":
+            from .errors import TaskNotFound
             tid = (q.get("id", [""])[0] or "").strip()
             if not tid:
                 return self._send_json({"error": "missing ?id=", "code": 400}, 400)
@@ -211,7 +268,7 @@ class Handler(BaseHTTPRequestHandler):
                     "pinned": False,
                     "hint": "no pinned spec — run `spec pin <id> <acceptance...>` or POST /api/spec/pin",
                 }})
-            except KeyError:
+            except (KeyError, TaskNotFound):
                 return self._send_json({"error": "no such task", "code": 404}, 404)
         if u.path == "/api/sessions":
             return self._send_json({"sessions": sessions.list_all(CFG)})
@@ -244,19 +301,46 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
         except ValueError as e:
             return self._send_json({"error": str(e), "code": 400}, 400)
+        from .errors import TaskNotFound, TaskValidation
         try:
             if path_no_q in ("/api/prove", "/prove"):
                 tid, proof = str(body.get("id", "")), str(body.get("proof", ""))
                 if not tid or not proof:
                     return self._send_json({"error": "id and proof required", "code": 400}, 400)
-                tasks.prove(CFG, tid, proof)
+                try:
+                    tasks.prove(CFG, tid, proof)
+                except TaskNotFound:
+                    return self._send_json({"error": "no such task", "code": 404}, 404)
+                except TaskValidation as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
                 ledger.log_gate(CFG, "prove", "F10", "pass", detail=f"proved {tid}")
                 return self._send_json({"ok": True})
+            if path_no_q in ("/api/task", "/task"):
+                title = str(body.get("title", "")).strip()
+                if not title:
+                    return self._send_json({"error": "title required", "code": 400}, 400)
+                try:
+                    nid = tasks.add(
+                        CFG,
+                        title,
+                        done=str(body.get("done") or body.get("done_looks_like") or ""),
+                        parent=body.get("parent"),
+                        why=str(body.get("why") or ""),
+                    )
+                    node = tasks.get(CFG, nid)
+                except Exception as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+                return self._send_json({"ok": True, "id": nid, "task": node})
             if path_no_q in ("/api/approve", "/approve"):
                 tid = str(body.get("id", ""))
                 if not tid:
                     return self._send_json({"error": "id required", "code": 400}, 400)
-                tasks.prove(CFG, tid, f"human-approved: {body.get('note', '')}")
+                try:
+                    tasks.prove(CFG, tid, f"human-approved: {body.get('note', '')}")
+                except TaskNotFound:
+                    return self._send_json({"error": "no such task", "code": 404}, 404)
+                except TaskValidation as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
                 ledger.log_gate(CFG, "human", "F7", "pass", detail=f"approved {tid}")
                 trust.record_approval(CFG, "approve", True)
                 return self._send_json({"ok": True})
@@ -287,7 +371,12 @@ class Handler(BaseHTTPRequestHandler):
                 tid = str(body.get("id", ""))
                 if not tid:
                     return self._send_json({"error": "id required", "code": 400}, 400)
-                tasks.set_status(CFG, tid, "doing")
+                try:
+                    tasks.set_status(CFG, tid, "doing")
+                except TaskNotFound:
+                    return self._send_json({"error": "no such task", "code": 404}, 404)
+                except TaskValidation as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
                 ledger.add_issue(CFG, "major", "review", f"sent back {tid}: {body.get('note', '')}")
                 trust.record_approval(CFG, "approve", False)
                 return self._send_json({"ok": True})
@@ -297,7 +386,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": "id (pivot) required", "code": 400}, 400)
                 try:
                     reopened = tasks.rollback(CFG, tid)
-                except KeyError:
+                except (KeyError, TaskNotFound):
                     return self._send_json({"error": "no such task", "code": 404}, 404)
                 ledger.log_gate(CFG, "rollback", "F2", "pass", detail=f"rollback to {tid} reopened {reopened}")
                 return self._send_json({"ok": True, "reopened": reopened})
@@ -310,7 +399,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": "id required", "code": 400}, 400)
                 try:
                     task = tasks.get(CFG, tid)
-                except KeyError:
+                except (KeyError, TaskNotFound):
                     return self._send_json({"error": "no such task", "code": 404}, 404)
                 try:
                     from . import spec as _specmod
@@ -383,14 +472,39 @@ class Handler(BaseHTTPRequestHandler):
                 new_model = str(body.get("model", "")).strip()
                 if not new_model:
                     return self._send_json({"error": "model required", "code": 400}, 400)
-                # validate via list if possible
+                from . import llm as _llm
+                available = _llm.list_models(CFG)
+                if available and new_model not in available:
+                    # Allow exact current model even if list endpoint flaked empty tags
+                    if new_model != CFG["llm"].get("model"):
+                        return self._send_json({
+                            "error": f"unknown model — choose one of: {', '.join(available[:12])}"
+                                     + ("…" if len(available) > 12 else ""),
+                            "code": 400,
+                            "models": available,
+                        }, 400)
                 CFG["llm"]["model"] = new_model
                 try:
                     from . import config as _cfg
                     _cfg.save(CFG)
                 except Exception as e:
                     return self._send_json({"error": f"cannot persist model: {e}", "code": 500}, 500)
-                return self._send_json({"ok": True, "model": new_model})
+                ctx = _llm.model_context_length(CFG, new_model)
+                return self._send_json({"ok": True, "model": new_model, "context_length": ctx})
+            if self.path.split("?")[0] == "/api/config":
+                from . import config as _cfg
+                from .errors import ConfigError
+                patch = body.get("config") if isinstance(body.get("config"), dict) else body
+                try:
+                    updated = _cfg.apply_patch(CFG, patch if isinstance(patch, dict) else {})
+                    CFG.clear()
+                    CFG.update(updated)
+                    _cfg.save(CFG)
+                    return self._send_json({"ok": True, "config": _cfg.public_view(CFG)})
+                except ConfigError as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+                except Exception as e:
+                    return self._send_json({"error": str(e), "code": 500}, 500)
             if self.path.split("?")[0] == "/api/workspace":
                 new_ws = str(body.get("path", "")).strip()
                 if not new_ws:
@@ -449,8 +563,6 @@ class Handler(BaseHTTPRequestHandler):
                 reply, gate = harness.answer(CFG, sid, msg[:20000])
                 return self._send_json({"session_id": sid, "reply": reply, "gate": gate})
             if self.path.split("?")[0] == "/api/chat/stream":
-                from . import llm
-
                 msg = str(body.get("message", ""))
                 if not msg.strip():
                     return self._send_json({"error": "message required", "code": 400}, 400)
@@ -462,34 +574,111 @@ class Handler(BaseHTTPRequestHandler):
                 if not sessions.get(CFG, sid):
                     return self._send_json({"error": "no such session", "code": 404}, 404)
                 user_text = msg[:20000]
+                skip_user = bool(body.get("skip_user_append"))
                 hist = sessions.history(CFG, sid)
                 messages = [{"role": "system", "content": harness.build_system(CFG)}]
                 for m in hist:
                     if m["role"] in ("user", "assistant"):
                         messages.append({"role": m["role"], "content": m["content"]})
-                messages.append({"role": "user", "content": user_text})
-                sessions.append(CFG, sid, "user", user_text)
+                if skip_user:
+                    # Regenerate / edit-resend: last hist turn must already be this user text.
+                    if not hist or hist[-1].get("role") != "user":
+                        return self._send_json(
+                            {"error": "skip_user_append requires last message to be user", "code": 400}, 400
+                        )
+                    if not messages or messages[-1].get("role") != "user":
+                        messages.append({"role": "user", "content": hist[-1].get("content") or user_text})
+                else:
+                    messages.append({"role": "user", "content": user_text})
+                    sessions.append(CFG, sid, "user", user_text)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("X-Content-Type-Options", "nosniff")
                 self.end_headers()
-                chunks: list[str] = []
                 try:
-                    for delta in llm.chat_stream(CFG, messages):
-                        chunks.append(delta)
-                        self.wfile.write(f"data: {json.dumps({'delta': delta})}\n\n".encode())
-                        self.wfile.flush()
-                    reply = "".join(chunks)
+                    tools_on = bool((CFG.get("tools") or {}).get("enabled", True))
+                    reply = ""
+                    agent_meta: dict = {}
+                    tool_events: list[dict] = []
+                    if tools_on:
+                        from .tools.runtime import run_agent_stream
+                        for ev in run_agent_stream(CFG, messages):
+                            if "delta" in ev:
+                                reply += ev["delta"]
+                            if "agent_meta" in ev:
+                                agent_meta = ev["agent_meta"]
+                                reply = ev.get("reply") or reply
+                            tc = ev.get("tool_call")
+                            if isinstance(tc, dict) and tc.get("name"):
+                                tool_events.append({
+                                    "kind": "call",
+                                    "name": tc.get("name"),
+                                    "arguments": tc.get("arguments"),
+                                })
+                            tr = ev.get("tool_result")
+                            if isinstance(tr, dict) and tr.get("name"):
+                                tool_events.append({
+                                    "kind": "result",
+                                    "name": tr.get("name"),
+                                    "ok": tr.get("ok"),
+                                    "content": tr.get("content"),
+                                })
+                            self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
+                            self.wfile.flush()
+                    else:
+                        from . import llm
+                        import time as _time
+                        chunks: list[str] = []
+                        t_first = None
+                        chars = 0
+                        for ev in llm.chat_stream(CFG, messages):
+                            if "delta" in ev:
+                                d = ev["delta"]
+                                chunks.append(d)
+                                chars += len(d)
+                                now = _time.monotonic()
+                                if t_first is None:
+                                    t_first = now
+                                elif now > t_first:
+                                    # live decode estimate while tokens arrive
+                                    tok = max(1, chars // 4)
+                                    live = {
+                                        "source": "live",
+                                        "completion_tokens": tok,
+                                        "decode_tps": round(tok / (now - t_first), 2),
+                                    }
+                                    self.wfile.write(f"data: {json.dumps({'delta': d, 'llm_stats': live})}\n\n".encode())
+                                else:
+                                    self.wfile.write(f"data: {json.dumps({'delta': d})}\n\n".encode())
+                                self.wfile.flush()
+                            elif "usage" in ev and isinstance(ev["usage"], dict):
+                                self.wfile.write(f"data: {json.dumps({'llm_stats': ev['usage']})}\n\n".encode())
+                                self.wfile.flush()
+                                if agent_meta is not None:
+                                    pass
+                                agent_meta = {**(agent_meta or {}), "llm_stats": ev["usage"]}
+                        reply = "".join(chunks)
                     gate = harness.check_reply(CFG, reply)
-                    sessions.append(CFG, sid, "assistant", reply, gate=gate)
+                    if agent_meta:
+                        gate = {**gate, "agent": agent_meta}
+                    sessions.append(CFG, sid, "assistant", reply, gate=gate, tools=tool_events or None)
                     self.wfile.write(
                         f"data: {json.dumps({'done': True, 'session_id': sid, 'gate': gate})}\n\n".encode())
                 except (BrokenPipeError, ConnectionResetError):
                     pass
+                except Exception as e:
+                    try:
+                        self.wfile.write(f"data: {json.dumps({'error': str(e)})}\n\n".encode())
+                    except Exception:
+                        pass
                 return
         except KeyError as e:
             return self._send_json({"error": str(e), "code": 404}, 404)
+        except TaskNotFound:
+            return self._send_json({"error": "no such task", "code": 404}, 404)
+        except TaskValidation as e:
+            return self._send_json({"error": str(e), "code": 400}, 400)
         except ValueError as e:
             return self._send_json({"error": str(e), "code": 400}, 400)
         except Exception as e:

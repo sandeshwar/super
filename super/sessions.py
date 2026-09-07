@@ -57,7 +57,14 @@ def list_all(cfg: dict) -> list:
     return out
 
 
-def append(cfg: dict, sid: str, role: str, content: str, gate: dict | None = None) -> dict:
+def append(
+    cfg: dict,
+    sid: str,
+    role: str,
+    content: str,
+    gate: dict | None = None,
+    tools: list | None = None,
+) -> dict:
     if role not in ("user", "assistant", "system"):
         raise StoreError(f"invalid role {role}")
     content = (content or "")[:MAX_MESSAGE_CHARS]
@@ -73,6 +80,26 @@ def append(cfg: dict, sid: str, role: str, content: str, gate: dict | None = Non
     msg = {"role": role, "content": content, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
     if gate is not None:
         msg["gate"] = gate
+    if tools:
+        # Cap persisted tool trace size (UI already truncates display).
+        clean = []
+        for t in tools[:40]:
+            if not isinstance(t, dict):
+                continue
+            row = {
+                "kind": t.get("kind"),
+                "name": str(t.get("name") or "")[:80],
+            }
+            if "ok" in t:
+                row["ok"] = bool(t.get("ok"))
+            if t.get("arguments") is not None:
+                row["arguments"] = t.get("arguments")
+            content_t = t.get("content")
+            if isinstance(content_t, str) and content_t:
+                row["content"] = content_t[:2000]
+            clean.append(row)
+        if clean:
+            msg["tools"] = clean
     s["messages"].append(msg)
     s["updated"] = msg["ts"]
     if len(s["messages"]) == 1 and role == "user" and s["title"] == "New chat":

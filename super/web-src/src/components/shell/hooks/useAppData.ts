@@ -1,25 +1,37 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from '../../../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { api, getAuthToken, hasAuthToken } from '../../../api';
 import type { TaskNode } from '../../../types';
 import { useOfflineQueue } from '../../../hooks/useOfflineQueue';
-import { userMessage } from '../../../lib/errors';
+import { ApiError, userMessage } from '../../../lib/errors';
 
 export type Stats = { proven: number; total: number; pct: number; gatePass: number; gateReject: number; pending: number; waiting: number; doing: number };
 
 export function useAppData() {
+  // Pick up ?token= before any child effect fires.
+  getAuthToken();
+
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
+  const [contextLength, setContextLength] = useState<number | null>(null);
   const [workspace, setWorkspace] = useState('');
   const [reloadFlash, setReloadFlash] = useState(false);
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [gates, setGates] = useState<Record<string, { pass: number; reject: number }>>({});
   const [criticals, setCriticals] = useState<unknown[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [authNeeded, setAuthNeeded] = useState(() => !hasAuthToken());
+  const [loading, setLoading] = useState(true);
   const { pending: offlinePending, enqueue } = useOfflineQueue();
+
+  const workspaceRef = useRef(workspace);
+  const modelRef = useRef(model);
+  workspaceRef.current = workspace;
+  modelRef.current = model;
 
   useEffect(() => { (window as unknown as { superEnqueue: typeof enqueue }).superEnqueue = enqueue; }, [enqueue]);
 
   const refresh = useCallback(async () => {
+    getAuthToken(); // re-read ?token= if navigated with it
     try {
       const [h, t, l] = await Promise.all([api.health(), api.tree(), api.ledger()]);
       setModel(h.model ?? '');
@@ -27,9 +39,20 @@ export function useAppData() {
       setGates(l.gates);
       setCriticals(l.open_criticals);
       setError(null);
+      setAuthNeeded(false);
     } catch (e) {
-      const msg = userMessage(e);
-      if (!String(msg).toLowerCase().includes('unauthorized')) setError(msg);
+      if (e instanceof ApiError && e.isAuth) {
+        setAuthNeeded(true);
+      } else {
+        const msg = userMessage(e);
+        if (!String(msg).toLowerCase().includes('unauthorized') && !String(msg).toLowerCase().includes('sign-in')) {
+          setError(msg);
+        } else {
+          setAuthNeeded(true);
+        }
+      }
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -38,43 +61,44 @@ export function useAppData() {
       const r = await api.models();
       setModels(r.models);
       if (r.current) setModel(r.current);
-    } catch {}
+      setContextLength(typeof r.context_length === 'number' && r.context_length > 0 ? r.context_length : null);
+    } catch { /* optional */ }
   }, []);
 
   const fetchWorkspace = useCallback(async () => {
     try {
       const w = await api.workspace();
       setWorkspace(w.workspace);
-    } catch {}
+    } catch { /* optional */ }
   }, []);
 
   useEffect(() => {
-    refresh();
-    fetchModels();
-    fetchWorkspace();
-    const id = window.setInterval(refresh, 5000);
+    void refresh();
+    void fetchModels();
+    void fetchWorkspace();
+    const id = window.setInterval(() => { void refresh(); }, 5000);
     const hotId = window.setInterval(async () => {
       try {
         const w = await api.workspace();
-        if (w.workspace !== workspace && workspace) {
+        if (w.workspace !== workspaceRef.current && workspaceRef.current) {
           setReloadFlash(true);
           setTimeout(() => setReloadFlash(false), 2000);
           setWorkspace(w.workspace);
           void refresh();
         }
         const m = await api.models();
-        if (m.current !== model && model) {
+        if (m.current !== modelRef.current && modelRef.current) {
           setReloadFlash(true);
           setTimeout(() => setReloadFlash(false), 2000);
           setModel(m.current);
         }
-      } catch {}
+      } catch { /* ignore hot poll errors */ }
     }, 3000);
     return () => { window.clearInterval(id); window.clearInterval(hotId); };
-  }, [refresh, fetchModels, fetchWorkspace, workspace, model]);
+  }, [refresh, fetchModels, fetchWorkspace]);
 
   useEffect(() => {
-    const onRefresh = () => void refresh();
+    const onRefresh = () => { void refresh(); };
     window.addEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
     return () => window.removeEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
   }, [refresh]);
@@ -92,8 +116,8 @@ export function useAppData() {
   }, [tasks, gates]);
 
   return {
-    model, setModel, models, workspace, setWorkspace, reloadFlash, setReloadFlash,
-    tasks, gates, criticals, error, setError, offlinePending,
-    stats, refresh, fetchModels, fetchWorkspace,
+    model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
+    tasks, gates, criticals, error, setError, authNeeded, setAuthNeeded, offlinePending, loading,
+    stats, refresh, fetchModels, fetchWorkspace, enqueue,
   };
 }

@@ -1,48 +1,86 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
-type Queued = { id: string; fn: () => Promise<void>; tries: number };
+type Queued = {
+  id: string;
+  fn: () => Promise<void>;
+  tries: number;
+  label?: string;
+};
+
+type Listener = (pending: number) => void;
+
+const MAX_TRIES = 5;
+const BASE_DELAY_MS = 800;
 
 /**
- * Offline queue — serializes POSTs when offline.
- * Single responsibility: queue + persistence (memory only, no IndexedDB to keep flat).
+ * Single shared offline queue (all views). Retries with backoff; never silent-drops
+ * until MAX_TRIES. Subscribe via useOfflineQueue().
  */
-export function useOfflineQueue() {
-  const q = useRef<Queued[]>([]);
-  const [pending, setPending] = useState(0);
-  const processing = useRef(false);
+class OfflineQueue {
+  private q: Queued[] = [];
+  private processing = false;
+  private listeners = new Set<Listener>();
 
-  const drain = useCallback(async () => {
-    if (processing.current) return;
-    processing.current = true;
-    while (q.current.length) {
-      const item = q.current[0];
+  get pending() { return this.q.length; }
+
+  subscribe(fn: Listener) {
+    this.listeners.add(fn);
+    fn(this.q.length);
+    return () => { this.listeners.delete(fn); };
+  }
+
+  private emit() {
+    const n = this.q.length;
+    this.listeners.forEach((l) => l(n));
+  }
+
+  enqueue = (fn: () => Promise<void>, label?: string) => {
+    const id = Math.random().toString(36).slice(2, 8);
+    this.q.push({ id, fn, tries: 0, label });
+    this.emit();
+    void this.drain();
+    return id;
+  };
+
+  drain = async () => {
+    if (this.processing) return;
+    this.processing = true;
+    while (this.q.length) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) break;
+      const item = this.q[0];
       try {
         await item.fn();
-        q.current.shift();
-        setPending(q.current.length);
+        this.q.shift();
+        this.emit();
       } catch {
-        // drop failed item
-        q.current.shift();
-        setPending(q.current.length);
+        item.tries += 1;
+        if (item.tries >= MAX_TRIES) {
+          this.q.shift();
+          this.emit();
+          continue;
+        }
+        this.emit();
+        await new Promise((r) => setTimeout(r, BASE_DELAY_MS * 2 ** (item.tries - 1)));
       }
     }
-    processing.current = false;
-  }, []);
+    this.processing = false;
+  };
+}
 
-  const enqueue = useCallback((fn: () => Promise<void>) => {
-    const id = Math.random().toString(36).slice(2,8);
-    q.current.push({ id, fn, tries: 0 });
-    setPending(q.current.length);
-    void drain();
-    return id;
-  }, [drain]);
+export const offlineQueue = new OfflineQueue();
 
-  // auto-drain on online
+export function useOfflineQueue() {
+  const [pending, setPending] = useState(offlineQueue.pending);
+  useEffect(() => offlineQueue.subscribe(setPending), []);
+
   useEffect(() => {
-    const on = () => void drain();
+    const on = () => void offlineQueue.drain();
     window.addEventListener('online', on);
     return () => window.removeEventListener('online', on);
-  }, [drain]);
+  }, []);
+
+  const enqueue = useCallback((fn: () => Promise<void>, label?: string) => offlineQueue.enqueue(fn, label), []);
+  const drain = useCallback(() => offlineQueue.drain(), []);
 
   return { enqueue, pending, drain };
 }

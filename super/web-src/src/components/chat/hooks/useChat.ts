@@ -1,12 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamChat } from '../../../api';
-import type { ChatMessage, GateInfo, SessionSummary, TaskNode } from '../../../types';
-import { userMessage } from '../../../lib/errors';
+import type { ChatMessage, GateInfo, LlmStats, SessionSummary, TaskNode, ToolEvent } from '../../../types';
+import { AbortError, ApiError, userMessage } from '../../../lib/errors';
 import { shortId } from '../../../utils/format';
 
 type ChatRouteOpts = {
   sessionId?: string | null;
   onSessionIdChange?: (id: string | null) => void;
+  contextLength?: number | null;
+};
+
+type SendOpts = {
+  skipUserAppend?: boolean;
+  /** When true, do not push a local user bubble (already present). */
+  reuseLocalUser?: boolean;
 };
 
 export function useChat(opts: ChatRouteOpts = {}) {
@@ -27,6 +34,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [leaf, setLeaf] = useState<TaskNode | null>(null);
   const [leafRendered, setLeafRendered] = useState('');
+  const [mentionPaths, setMentionPaths] = useState<string[]>([]);
   const [showSlash, setShowSlash] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [showMention, setShowMention] = useState(false);
@@ -35,9 +43,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [cost, setCost] = useState<{ prompt: number; completion: number; total: number } | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [llmStats, setLlmStats] = useState<LlmStats | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const busyRef = useRef(false);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -55,24 +67,53 @@ export function useChat(opts: ChatRouteOpts = {}) {
       const r = await api.leaf();
       setLeaf(r.leaf);
       setLeafRendered(r.rendered);
-    } catch {}
+    } catch { /* leaf optional */ }
   }, []);
 
-  useEffect(() => { void loadSessions(); void loadLeaf(); }, [loadSessions, loadLeaf]);
+  const loadMentionPaths = useCallback(async () => {
+    try {
+      const { tasks } = await api.tree();
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const t of tasks) {
+        for (const f of t.files || []) {
+          const p = String(f).trim();
+          if (!p || seen.has(p)) continue;
+          seen.add(p);
+          out.push(p);
+          if (out.length >= 80) break;
+        }
+        if (out.length >= 80) break;
+      }
+      setMentionPaths(out);
+    } catch { /* optional */ }
+  }, []);
+
+  useEffect(() => { void loadSessions(); void loadLeaf(); void loadMentionPaths(); }, [loadSessions, loadLeaf, loadMentionPaths]);
   useEffect(() => {
     const id = window.setInterval(() => { void loadLeaf(); }, 8000);
     return () => window.clearInterval(id);
   }, [loadLeaf]);
 
   useEffect(() => {
-    if (!activeId) return;
+    if (!activeId) {
+      setMessages([]);
+      setLlmStats(null);
+      return;
+    }
     let cancelled = false;
     api.session(activeId)
-      .then((s) => { if (!cancelled) setMessages(s.messages); })
+      .then((s) => {
+        if (cancelled) return;
+        setMessages(s.messages);
+        const last = [...s.messages].reverse().find((m) => m.role === 'assistant');
+        const stats = last?.gate?.agent?.llm_stats;
+        setLlmStats(stats && typeof stats === 'object' ? stats : null);
+      })
       .catch((e) => {
         if (cancelled) return;
         const msg = userMessage(e).toLowerCase();
-        if (msg.includes('no such session') || msg.includes('404')) {
+        if (msg.includes('no such session') || msg.includes('404') || (e instanceof ApiError && e.isNotFound)) {
           setActiveId(null);
           setMessages([]);
           void loadSessions();
@@ -82,23 +123,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
         }
       });
     return () => { cancelled = true; };
-  }, [activeId, loadSessions]);
-
-  useEffect(() => {
-    if (activeId && sessions.length > 0 && !sessions.some((s) => s.id === activeId)) {
-      setActiveId(null);
-      setMessages([]);
-    }
-  }, [sessions, activeId]);
+  }, [activeId, loadSessions, setActiveId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
   useEffect(() => { inputRef.current?.focus(); }, [activeId]);
-
-  useEffect(() => {
-    const h = () => void loadSessions();
-    window.addEventListener('super-new-chat' as unknown as string, h as EventListener);
-    return () => window.removeEventListener('super-new-chat' as unknown as string, h as EventListener);
-  }, [loadSessions]);
 
   const filtered = useMemo(() => {
     if (!filter.trim()) return sessions;
@@ -113,15 +141,20 @@ export function useChat(opts: ChatRouteOpts = {}) {
     const prompt = Math.ceil(chars / 4);
     const completion = messages.filter((m) => m.role === 'assistant').reduce((a, m) => a + Math.ceil(m.content.length / 4), 0);
     const total = prompt + completion;
-    const limit = 8000;
-    return { prompt, completion, total, limit, pct: Math.min(100, Math.round((total / limit) * 100)) };
-  }, [messages, leafRendered]);
+    const limit = typeof opts.contextLength === 'number' && opts.contextLength > 0 ? opts.contextLength : null;
+    const pct = limit ? Math.min(100, Math.round((total / limit) * 100)) : null;
+    return { prompt, completion, total, limit, pct };
+  }, [messages, leafRendered, opts.contextLength]);
 
-  const send = useCallback(async (overrideText?: string) => {
+  const systemNote = useCallback((content: string) => {
+    setMessages((m) => [...m, { role: 'assistant', content, ts: new Date().toISOString() }]);
+  }, []);
+
+  const send = useCallback(async (overrideText?: string, sendOpts: SendOpts = {}) => {
     const text = (overrideText ?? input).trim();
-    if (!text || busy) return;
+    if (!text || busyRef.current) return;
     if (text.startsWith('/')) {
-      const [cmd, ...rest] = text.split(' ');
+      const [cmd, ...rest] = text.split(/\s+/);
       if (cmd === '/clear') { setMessages([]); setInput(''); return; }
       if (cmd === '/export') {
         const md = messages.map((m) => `**${m.role}**: ${m.content}`).join('\n\n');
@@ -133,75 +166,171 @@ export function useChat(opts: ChatRouteOpts = {}) {
       }
       if (cmd === '/add-task') {
         const title = rest.join(' ').replace(/--done.*/, '').trim() || 'Untitled';
-        try { await fetch('/api/task', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('super_token') || ''}` }, body: JSON.stringify({ title }) }); } catch {}
+        try {
+          const r = await api.addTask(title);
+          systemNote(`Added task #${r.id}: ${title}`);
+          window.dispatchEvent(new Event('super-refresh'));
+        } catch (e) {
+          systemNote(`Could not add task: ${userMessage(e)}`);
+        }
         setInput('');
         return;
       }
       if (cmd === '/spec-pin') {
         const [id, ...acc] = rest;
+        if (!id) { systemNote('Usage: /spec-pin <task-id> <acceptance…>'); setInput(''); return; }
         try {
-          const r = await fetch('/api/spec/pin', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${sessionStorage.getItem('super_token') || ''}` }, body: JSON.stringify({ id, acceptance: acc }) });
-          const body = await r.json();
-          setMessages((m) => [...m, { role: 'assistant', content: r.ok && body.ok ? `Spec pinned for ${id}: ${acc.length} check(s)` : `Spec pin failed: ${body.error || r.status}`, ts: new Date().toISOString() }]);
-        } catch (e) { setMessages((m) => [...m, { role: 'assistant', content: `Spec pin failed: ${(e as Error).message}`, ts: new Date().toISOString() }]); }
+          await api.pinSpec(id, acc.length ? acc : ['done']);
+          systemNote(`Pinned checks for ${id}: ${acc.length || 1} item(s)`);
+        } catch (e) {
+          systemNote(`Spec pin failed: ${userMessage(e)}`);
+        }
+        setInput('');
+        return;
+      }
+      if (cmd === '/prove') {
+        const [id, ...proofParts] = rest;
+        const proof = proofParts.join(' ').trim();
+        if (!id || !proof) { systemNote('Usage: /prove <task-id> <proof note>'); setInput(''); return; }
+        try {
+          await api.prove(id, proof);
+          systemNote(`Proof attached to ${id}.`);
+          window.dispatchEvent(new Event('super-refresh'));
+        } catch (e) {
+          systemNote(`Prove failed: ${userMessage(e)}`);
+        }
         setInput('');
         return;
       }
     }
+
     setError(null);
+    busyRef.current = true;
     setBusy(true);
     setInput('');
     setShowSlash(false);
     setShowMention(false);
+    setLlmStats(null);
     const startChars = text.length;
-    setMessages((m) => [...m, { role: 'user', content: text, ts: new Date().toISOString() }]);
+    if (!sendOpts.reuseLocalUser) {
+      setMessages((m) => [...m, { role: 'user', content: text, ts: new Date().toISOString() }]);
+    }
     let acc = '';
-    setMessages((m) => [...m, { role: 'assistant', content: '', ts: new Date().toISOString() }]);
+    const toolEvents: ToolEvent[] = [];
+    setMessages((m) => [...m, { role: 'assistant', content: '', ts: new Date().toISOString(), tools: [] }]);
     const ac = new AbortController();
     abortRef.current = ac;
-    const attempt = async (sid: string | null): Promise<{ session_id: string; gate: GateInfo }> => {
-      return streamChat(sid, text, (d) => {
+
+    const attempt = async (sid: string | null) =>
+      streamChat(sid, text, (d) => {
         if (ac.signal.aborted) return;
         acc += d;
-        setMessages((m) => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], content: acc }; return c; });
+        setMessages((m) => {
+          const c = [...m];
+          c[c.length - 1] = { ...c[c.length - 1], content: acc, tools: [...toolEvents] };
+          return c;
+        });
+      }, {
+        signal: ac.signal,
+        skipUserAppend: sendOpts.skipUserAppend,
+        onEvent: (ev) => {
+          if (ac.signal.aborted) return;
+          const stats = ev.llm_stats as LlmStats | undefined;
+          if (stats && typeof stats === 'object') {
+            setLlmStats(stats);
+          }
+          const call = ev.tool_call as { name?: string; arguments?: unknown } | undefined;
+          const result = ev.tool_result as { name?: string; ok?: boolean; content?: string } | undefined;
+          if (call?.name) {
+            toolEvents.push({ kind: 'call', name: call.name, arguments: call.arguments });
+            setMessages((m) => {
+              const c = [...m];
+              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents] };
+              return c;
+            });
+          }
+          if (result?.name) {
+            toolEvents.push({ kind: 'result', name: result.name, ok: result.ok, content: result.content });
+            setMessages((m) => {
+              const c = [...m];
+              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents] };
+              return c;
+            });
+          }
+        },
       });
-    };
+
     try {
       let res: { session_id: string; gate: GateInfo };
       try {
         res = await attempt(activeId);
       } catch (e) {
-        const msg = (e as Error).message?.toLowerCase() ?? '';
-        const isStale = msg.includes('no such session') || (e instanceof Error && (e as unknown as { status?: number }).status === 404);
-        if (isStale && activeId) {
+        const isStale =
+          (e instanceof ApiError && e.isNotFound) ||
+          userMessage(e).toLowerCase().includes('no such session');
+        if (isStale && activeId && !sendOpts.skipUserAppend) {
           setActiveId(null);
           acc = '';
-          setMessages((m) => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], content: '' }; return c; });
+          setMessages((m) => {
+            const c = [...m];
+            c[c.length - 1] = { ...c[c.length - 1], content: '', tools: [] };
+            return c;
+          });
           res = await attempt(null);
         } else {
           throw e;
         }
       }
-      setMessages((m) => { const c = [...m]; c[c.length - 1] = { ...c[c.length - 1], content: acc, gate: res.gate }; return c; });
+      setMessages((m) => {
+        const c = [...m];
+        c[c.length - 1] = { ...c[c.length - 1], content: acc, gate: res.gate, tools: [...toolEvents] };
+        return c;
+      });
+      const finalStats = res.gate?.agent?.llm_stats;
+      if (finalStats) setLlmStats(finalStats);
       if (!activeId) setActiveId(res.session_id);
       await loadSessions();
       await loadLeaf();
-      setCost({ prompt: Math.ceil((startChars + (leafRendered?.length || 0)) / 4), completion: Math.ceil(acc.length / 4), total: Math.ceil((startChars + acc.length + (leafRendered?.length || 0)) / 4) });
+      setCost({
+        prompt: Math.ceil((startChars + (leafRendered?.length || 0)) / 4),
+        completion: Math.ceil(acc.length / 4),
+        total: Math.ceil((startChars + acc.length + (leafRendered?.length || 0)) / 4),
+      });
     } catch (e) {
-      if ((e as Error).name !== 'AbortError') {
+      if (e instanceof AbortError || (e as Error)?.name === 'AbortError') {
+        setMessages((m) => {
+          if (!m.length) return m;
+          const last = m[m.length - 1];
+          if (last.role === 'assistant' && !last.content.trim() && !(last.tools?.length)) {
+            return m.slice(0, -1);
+          }
+          if (last.role === 'assistant') {
+            const c = [...m];
+            c[c.length - 1] = { ...last, content: last.content || '_(stopped)_' };
+            return c;
+          }
+          return m;
+        });
+      } else {
         setError(userMessage(e));
-        setMessages((m) => m.slice(0, -1));
+        setMessages((m) => {
+          if (!m.length) return m;
+          // Drop empty assistant; keep user (server may already have it).
+          const last = m[m.length - 1];
+          if (last.role === 'assistant') return m.slice(0, -1);
+          return m;
+        });
       }
     } finally {
+      busyRef.current = false;
       setBusy(false);
       abortRef.current = null;
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [input, busy, activeId, loadSessions, loadLeaf, leafRendered, activeMeta, messages]);
+  }, [input, activeId, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
-    setBusy(false);
   }, []);
 
   const regenerate = useCallback(async (idx: number) => {
@@ -209,8 +338,16 @@ export function useChat(opts: ChatRouteOpts = {}) {
     if (userIdx < 0 || messages[userIdx]?.role !== 'user') return;
     const prompt = messages[userIdx].content;
     setMessages((m) => m.slice(0, userIdx + 1));
-    await send(prompt);
-  }, [messages, send]);
+    if (activeId) {
+      try {
+        await api.editMessage(activeId, userIdx, prompt);
+      } catch (e) {
+        setError(userMessage(e));
+        return;
+      }
+    }
+    await send(prompt, { skipUserAppend: Boolean(activeId), reuseLocalUser: true });
+  }, [messages, send, activeId]);
 
   const editAndResend = useCallback(async (idx: number) => {
     if (editingIdx !== idx) { setEditingIdx(idx); setEditDraft(messages[idx].content); return; }
@@ -221,7 +358,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       const s = await api.session(activeId);
       setMessages(s.messages);
       setEditingIdx(null);
-      await send(newContent);
+      await send(newContent, { skipUserAppend: true, reuseLocalUser: true });
     } catch (e) { setError(userMessage(e)); }
   }, [editingIdx, editDraft, messages, activeId, send]);
 
@@ -234,7 +371,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       const s = await api.session(r.id);
       setMessages(s.messages);
     } catch (e) { setError(userMessage(e)); }
-  }, [activeId, activeMeta, loadSessions]);
+  }, [activeId, activeMeta, loadSessions, setActiveId]);
 
   const shareExport = useCallback((fmt: 'md' | 'json') => {
     if (!messages.length) return;
@@ -259,19 +396,81 @@ export function useChat(opts: ChatRouteOpts = {}) {
       setMessages([]);
       setCost(null);
     } catch (e) { setError(userMessage(e)); }
-  }, [loadSessions]);
+  }, [loadSessions, setActiveId]);
+
+  useEffect(() => {
+    const h = () => { void newChat(); };
+    window.addEventListener('super-new-chat' as unknown as string, h as EventListener);
+    return () => window.removeEventListener('super-new-chat' as unknown as string, h as EventListener);
+  }, [newChat]);
+
+  useEffect(() => {
+    const onRefresh = () => {
+      void loadSessions();
+      void loadLeaf();
+      void loadMentionPaths();
+    };
+    window.addEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
+    return () => window.removeEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
+  }, [loadSessions, loadLeaf, loadMentionPaths]);
 
   const deleteChat = useCallback(async (id: string) => {
     try {
       setError(null);
       await api.deleteSession(id);
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
       if (activeId === id) {
         setActiveId(null);
         setMessages([]);
       }
       await loadSessions();
     } catch (e) { setError(userMessage(e)); }
-  }, [activeId, loadSessions]);
+  }, [activeId, loadSessions, setActiveId]);
+
+  const toggleSelectMode = useCallback(() => {
+    setSelectMode((v) => {
+      if (v) setSelectedIds(new Set());
+      return !v;
+    });
+  }, []);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllFiltered = useCallback(() => {
+    setSelectedIds(new Set(filtered.map((s) => s.id)));
+  }, [filtered]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const deleteSelected = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (!ids.length) return;
+    try {
+      setError(null);
+      for (const id of ids) {
+        await api.deleteSession(id);
+      }
+      if (activeId && selectedIds.has(activeId)) {
+        setActiveId(null);
+        setMessages([]);
+      }
+      setSelectedIds(new Set());
+      setSelectMode(false);
+      await loadSessions();
+    } catch (e) { setError(userMessage(e)); }
+  }, [selectedIds, activeId, loadSessions, setActiveId]);
 
   const renameChat = useCallback(async (id: string, newTitle: string | null) => {
     try {
@@ -290,9 +489,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
       setShowMention(false);
     } else if (v.includes('@')) {
       const at = v.lastIndexOf('@');
-      const f = v.slice(at + 1).split(' ')[0].toLowerCase();
+      const f = v.slice(at + 1).split(/\s/)[0].toLowerCase();
       setMentionFilter(f);
       setShowMention(true);
+      setMentionIndex(0);
       setShowSlash(false);
     } else {
       setShowSlash(false);
@@ -306,13 +506,16 @@ export function useChat(opts: ChatRouteOpts = {}) {
     const txt = await f.text().catch(() => '');
     const snippet = txt.slice(0, 2000);
     setInput((prev) => `${prev}\n\n\`\`\`${f.name}\n${snippet}\n\`\`\``.trimStart());
+    e.target.value = '';
   };
 
   return {
     sessions, filtered, activeId, setActiveId, messages, input, setInput, busy, error, setError, filter, setFilter,
-    isRenaming, leaf, leafRendered, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
+    isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
+    selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
+    llmStats,
     loadSessions, loadLeaf, send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
-    handleInputChange, handleFile, setShowSlash, setShowMention
+    handleInputChange, handleFile, setShowSlash, setShowMention,
   };
 }

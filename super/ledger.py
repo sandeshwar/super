@@ -92,36 +92,119 @@ def _expired(rec: dict, now: str | None = None) -> bool:
     return (now or time.strftime("%Y-%m-%dT%H:%M:%S")) > exp
 
 
+def _resolved_texts(rows: list) -> set[str]:
+    """Texts closed by a later resolve record (append-only ledger)."""
+    out: set[str] = set()
+    for r in rows:
+        if r.get("status") != "resolved":
+            continue
+        key = (r.get("resolves_text") or "").strip()
+        if key:
+            out.add(key)
+            continue
+        # Legacy resolve_issue format: "resolved: <original> (<resolution>)"
+        text = (r.get("text") or "").strip()
+        if text.startswith("resolved: "):
+            body = text[len("resolved: "):]
+            if " (" in body:
+                body = body.rsplit(" (", 1)[0]
+            if body:
+                out.add(body)
+    return out
+
+
 def open_issues(cfg: dict, include_expired: bool = False) -> list:
-    rows = [r for r in _read_issues(cfg) if r.get("status", "open") == "open"]
+    rows = _read_issues(cfg)
+    closed = _resolved_texts(rows)
+    opens = [
+        r for r in rows
+        if r.get("status", "open") == "open" and (r.get("text") or "").strip() not in closed
+    ]
     if not include_expired:
-        rows = [r for r in rows if not _expired(r)]
-    return rows
+        opens = [r for r in opens if not _expired(r)]
+    return opens
 
 
 def open_criticals(cfg: dict) -> list:
+    reconcile_dependency_issues(cfg)
     return [r for r in open_issues(cfg) if r.get("severity") == "critical"]
 
 
 def resolve_issue(cfg: dict, index: int, resolution: str = "") -> dict:
     """Append a resolution record closing the nth open issue (stable order)."""
-    issues = _read_issues(cfg)
-    opens = [r for r in issues if r.get("status", "open") == "open"]
+    opens = open_issues(cfg, include_expired=True)
     if index < 0 or index >= len(opens):
         raise IndexError(f"no open issue at index {index}")
-    target = opens[index]
+    return resolve_issue_text(cfg, opens[index].get("text", ""), resolution)
+
+
+def resolve_issue_text(cfg: dict, text: str, resolution: str = "") -> dict:
+    """Close every open issue whose text matches exactly."""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("issue text required")
+    target = None
+    for iss in open_issues(cfg, include_expired=True):
+        if (iss.get("text") or "").strip() == text:
+            target = iss
+            break
+    if target is None:
+        raise IndexError(f"no open issue matching text")
     store.append_jsonl(
         _issue_path(cfg),
         {
             "severity": target.get("severity", "minor"),
             "layer": target.get("layer", ""),
-            "text": f"resolved: {target.get('text', '')} ({resolution})",
+            "text": f"resolved: {text}" + (f" ({resolution})" if resolution else ""),
+            "resolves_text": text,
             "status": "resolved",
             "expires": "",
             "owner": target.get("owner", ""),
+            "session": target.get("session", "local"),
         },
     )
     return target
+
+
+def resolve_matching(cfg: dict, contains: str, resolution: str = "", layer: str | None = None) -> int:
+    """Resolve open issues whose text contains `contains` (case-insensitive)."""
+    needle = (contains or "").strip().lower()
+    if not needle:
+        return 0
+    n = 0
+    for iss in list(open_issues(cfg)):
+        if layer and iss.get("layer") != layer:
+            continue
+        if needle in (iss.get("text") or "").lower():
+            resolve_issue_text(cfg, iss.get("text", ""), resolution=resolution or f"matched {contains}")
+            n += 1
+    return n
+
+
+def reconcile_dependency_issues(cfg: dict) -> int:
+    """Close security issues for packages that later passed the dependency gate."""
+    gates = store.read_jsonl(_gate_path(cfg))
+    passed: set[str] = set()
+    for r in gates:
+        if r.get("gate") != "dependency" or r.get("decision") != "pass":
+            continue
+        detail = (r.get("detail") or "").strip()
+        name = detail.split("@", 1)[0].strip().lower()
+        if name and name not in ("dependency clear", "?"):
+            passed.add(name)
+    if not passed:
+        return 0
+    n = 0
+    for iss in list(open_issues(cfg)):
+        if iss.get("layer") not in ("security", "legal"):
+            continue
+        text = (iss.get("text") or "").lower()
+        for pkg in passed:
+            if pkg in text:
+                resolve_issue_text(cfg, iss.get("text", ""), resolution=f"superseded by dependency pass ({pkg})")
+                n += 1
+                break
+    return n
 
 
 def gate_stats(cfg: dict) -> dict:

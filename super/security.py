@@ -295,6 +295,16 @@ def gate_dependency(cfg: dict, name: str, version: str = "",
         ledger.add_issue(cfg, "major", "legal", f"unapproved license {license} for {name}")
         return False, f"license {license} needs legal review"
     ledger.log_gate(cfg, "dependency", "F5", "pass", detail=f"{name}@{version or '?'}")
+    # Prior CVE/typosquat/unpinned criticals for this package should not block done-state forever.
+    try:
+        ledger.resolve_matching(
+            cfg,
+            contains=name,
+            resolution=f"dependency clear {name}@{version or '?'}",
+            layer="security",
+        )
+    except Exception:
+        pass
     return True, "dependency clear"
 
 

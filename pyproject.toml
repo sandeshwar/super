@@ -9,6 +9,25 @@ description = "SUPER production coding harness: gated, provenanced, risk-calibra
 requires-python = ">=3.10"
 license = { text = "MIT" }
 
+[project.optional-dependencies]
+# LangChain / LangGraph / CrewAI bridge (see super.tools.langchain_bridge)
+agent = [
+  "langchain-core>=0.3",
+  "langchain-community>=0.3",
+  "langchain-experimental>=0.3",
+  "langgraph>=0.2",
+  "duckduckgo-search>=6.0",
+  "wikipedia>=1.4",
+  "arxiv>=2.0",
+]
+crewai = [
+  "crewai>=0.80",
+  "crewai-tools>=0.14",
+]
+dev = [
+  "pytest>=8.0",
+]
+
 [project.scripts]
 super = "super.cli:main"
 

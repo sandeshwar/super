@@ -1,7 +1,6 @@
 import type { ChatMessage } from '../../types';
 import { Button } from '../ui/Button';
 import { Avatar } from './Avatar';
-import { GateChip } from './GateChip';
 import { MessageActions } from './MessageActions';
 import { MessageBubble } from './MessageBubble';
 import { formatTime } from '../../utils/format';
@@ -23,10 +22,18 @@ type Props = {
   onStop: () => void;
 };
 
+function msgKey(message: ChatMessage, index: number): string {
+  return `${message.role}-${message.ts || 't'}-${index}-${(message.content || '').slice(0, 24)}`;
+}
+
 export function MessageItem({ message, index, busy, isLast, editingIdx, editDraft, setEditDraft, setEditingIdx, onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop }: Props) {
   const isUser = message.role === 'user';
   return (
-    <div className="msg-wrap fade-in" style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start', alignSelf: isUser ? 'flex-end' : 'stretch', width: isUser ? 'auto' : '100%', maxWidth: isUser ? '80%' : '100%', flexDirection: isUser ? 'row-reverse' : 'row', overflow: 'visible', position: 'relative' }}>
+    <div
+      className="msg-wrap fade-in"
+      data-msg-key={msgKey(message, index)}
+      style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start', alignSelf: isUser ? 'flex-end' : 'stretch', width: isUser ? 'auto' : '100%', maxWidth: isUser ? '80%' : '100%', flexDirection: isUser ? 'row-reverse' : 'row', overflow: 'visible', position: 'relative' }}
+    >
       <Avatar role={message.role} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', alignItems: isUser ? 'flex-end' : 'stretch', flex: 1, minWidth: 0, overflow: 'visible' }}>
         {editingIdx === index ? (
@@ -42,7 +49,6 @@ export function MessageItem({ message, index, busy, isLast, editingIdx, editDraf
         )}
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
           <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-4)', whiteSpace: 'nowrap', letterSpacing: 'var(--tracking-wide)', fontWeight: 500 }}>{isUser ? 'YOU' : 'SUPER'} · {formatTime(message.ts) || (busy && isLast ? 'now' : '')}</span>
-          {message.role === 'assistant' && <GateChip gate={message.gate} />}
         </div>
         <MessageActions
           message={message}

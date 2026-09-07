@@ -39,6 +39,7 @@ function layout(tasks: TaskNode[]): Map<string, Pos> {
 export function DagGraph({ tasks, onSelect, selected, bare }: { tasks: TaskNode[]; onSelect: (id: string) => void; selected?: string | null; bare?: boolean }) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
   const dragging = useRef(false);
   const last = useRef({ x: 0, y: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
@@ -67,6 +68,7 @@ export function DagGraph({ tasks, onSelect, selected, bare }: { tasks: TaskNode[
 
   const onPointerDown = (e: React.PointerEvent) => {
     dragging.current = true;
+    setIsDragging(true);
     last.current = { x: e.clientX, y: e.clientY };
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
@@ -77,7 +79,10 @@ export function DagGraph({ tasks, onSelect, selected, bare }: { tasks: TaskNode[
     last.current = { x: e.clientX, y: e.clientY };
     setPan((p) => ({ x: p.x + dx, y: p.y + dy }));
   };
-  const onPointerUp = () => { dragging.current = false; };
+  const onPointerUp = () => {
+    dragging.current = false;
+    setIsDragging(false);
+  };
 
   const statusColor = (s: string) => s === 'proven' ? 'var(--green)' : s === 'blocked' ? 'var(--red)' : s === 'doing' ? 'var(--blue)' : s === 'waiting' ? 'var(--yellow)' : 'var(--fg-3)';
 
@@ -96,7 +101,7 @@ export function DagGraph({ tasks, onSelect, selected, bare }: { tasks: TaskNode[
           <button className="btn btn-sm" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}>reset</button>
         </span>
       </div>
-      <div style={{ overflow: 'hidden', height: 240, cursor: dragging.current ? 'grabbing' : 'grab' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+      <div style={{ overflow: 'hidden', height: 240, cursor: isDragging ? 'grabbing' : 'grab' }} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <svg
           ref={svgRef}
           width={bounds.w * zoom}

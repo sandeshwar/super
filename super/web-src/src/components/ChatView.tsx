@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Card } from './ui/Card';
+import { Button } from './ui/Button';
 import { useChat } from './chat/hooks/useChat';
 import { SessionsPanel } from './chat/SessionsPanel';
 import { LeafBanner } from './chat/LeafBanner';
@@ -14,33 +16,54 @@ import { ChatDock } from './chat/ChatDock';
 export default function ChatView({
   sessionId,
   onSessionIdChange,
+  contextLength,
 }: {
   sessionId: string | null;
   onSessionIdChange: (id: string | null) => void;
+  contextLength?: number | null;
 }) {
   const {
     sessions, filtered, activeId, setActiveId, messages, input, busy, error, setError, filter, setFilter,
-    isRenaming, leaf, leafRendered, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
+    isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
+    selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
+    llmStats,
     send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention,
-  } = useChat({ sessionId, onSessionIdChange });
+  } = useChat({ sessionId, onSessionIdChange, contextLength });
+
+  const [sessionsOpen, setSessionsOpen] = useState(false);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 'var(--space-3)', height: 'calc(100vh - 108px)', minHeight: 440 }}>
+    <div className={`cols-chat ${sessionsOpen ? 'sessions-open' : ''}`}>
+      <div className="chat-sessions-toggle-row">
+        <Button size="sm" variant="ghost" onClick={() => setSessionsOpen((v) => !v)} aria-expanded={sessionsOpen}>
+          {sessionsOpen ? 'Hide chats' : `Chats${sessions.length ? ` (${sessions.length})` : ''}`}
+        </Button>
+        <Button size="sm" variant="primary" onClick={() => void newChat()}>New chat</Button>
+      </div>
+
       <SessionsPanel
         sessions={sessions}
         filtered={filtered}
         activeId={activeId}
         filter={filter}
+        busy={busy}
+        selectMode={selectMode}
+        selectedIds={selectedIds}
         onFilter={setFilter}
         onNewChat={newChat}
-        onSelect={setActiveId}
+        onSelect={(id) => { setActiveId(id); setSessionsOpen(false); }}
         onDelete={(id) => void deleteChat(id)}
         onRename={(id, t) => void renameChat(id, t)}
+        onToggleSelectMode={toggleSelectMode}
+        onToggleSelected={toggleSelected}
+        onSelectAllFiltered={selectAllFiltered}
+        onClearSelection={clearSelection}
+        onDeleteSelected={() => void deleteSelected()}
       />
 
-      <Card style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Card className="chat-panel">
         <LeafBanner leaf={leaf} leafRendered={leafRendered} />
         <ChatHeader
           activeId={activeId}
@@ -48,10 +71,9 @@ export default function ChatView({
           messages={messages}
           isRenaming={isRenaming}
           onRename={(id, t) => void renameChat(id, t)}
-          onShare={(fmt) => shareExport(fmt)}
           busy={busy}
         />
-        <ContextBar tokenStats={tokenStats} leaf={leaf} messagesLen={messages.length} cost={cost} />
+        <ContextBar tokenStats={tokenStats} leaf={leaf} messagesLen={messages.length} cost={cost} llmStats={llmStats} busy={busy} />
         <MessageList
           messages={messages}
           busy={busy}
@@ -67,6 +89,7 @@ export default function ChatView({
           onRegenerate={(idx) => void regenerate(idx)}
           onStop={stop}
           onSetInput={(v) => handleInputChange(v)}
+          onSendSuggestion={(v) => void send(v)}
           onClearError={() => setError(null)}
           bottomRef={bottomRef}
         />
@@ -80,6 +103,7 @@ export default function ChatView({
           showMention={showMention}
           mentionFilter={mentionFilter}
           mentionIndex={mentionIndex}
+          mentionPaths={mentionPaths}
           setMentionIndex={setMentionIndex}
           onClosePopovers={() => { setShowSlash(false); setShowMention(false); }}
           onInput={handleInputChange}
