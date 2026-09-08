@@ -90,6 +90,9 @@ DEFAULTS = {
             "memory": True,
             "project": True,
             "agents": True,
+            "capabilities": True,
+            "intelligence": True,
+            "user_caps": True,
         },
         "disabled": [],
         "packs": {
@@ -115,12 +118,24 @@ DEFAULTS = {
         "max_agents": 50,
         "allow_agent_create_roles": ["worker", "planner"],
     },
+    "capabilities": {
+        "enabled": True,
+        "auto_install_low": True,
+        "http_allowlist": [],
+    },
+    "intelligence": {
+        "enabled": True,
+        "auto_act": True,
+        "inject_briefing": True,
+        "min_interval_s": 30,
+        "max_agenda": 40,
+    },
     "server": {"host": "0.0.0.0", "port": 4311, "token": ""},
     "state_dir": ".super",
 }
 
 # Keys exposed via GET/POST /api/config (never includes server.token).
-PUBLIC_SECTIONS = ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools", "agents")
+PUBLIC_SECTIONS = ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools", "agents", "capabilities", "intelligence")
 
 _BOOL_KEYS = {
     ("gates", k) for k in DEFAULTS["gates"]
@@ -245,6 +260,26 @@ def _validate(cfg: dict) -> None:
             roles = agents["allow_agent_create_roles"]
             if not isinstance(roles, list) or not all(isinstance(x, str) for x in roles):
                 raise ConfigError("agents.allow_agent_create_roles must be a list of strings")
+        caps = cfg.get("capabilities") or {}
+        if not isinstance(caps, dict):
+            raise ConfigError("capabilities must be an object")
+        for bk in ("enabled", "auto_install_low"):
+            if bk in caps and not isinstance(caps[bk], bool):
+                raise ConfigError(f"capabilities.{bk} must be boolean")
+        intel = cfg.get("intelligence") or {}
+        if not isinstance(intel, dict):
+            raise ConfigError("intelligence must be an object")
+        for bk in ("enabled", "auto_act", "inject_briefing"):
+            if bk in intel and not isinstance(intel[bk], bool):
+                raise ConfigError(f"intelligence.{bk} must be boolean")
+        if "min_interval_s" in intel:
+            v = intel["min_interval_s"]
+            if not isinstance(v, (int, float)) or v < 0 or v > 3600:
+                raise ConfigError("intelligence.min_interval_s must be in [0, 3600]")
+        if "max_agenda" in intel:
+            v = intel["max_agenda"]
+            if not isinstance(v, int) or v < 5 or v > 100:
+                raise ConfigError("intelligence.max_agenda must be an int in [5, 100]")
     except KeyError as e:
         raise ConfigError(f"missing required config key: {e}") from e
 

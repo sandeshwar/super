@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, type AgentSpec, type MemoryClaim } from '../api';
+import { api, type AgentSpec, type AgendaItem, type CapabilitySpec, type MemoryClaim } from '../api';
 import { userMessage } from '../lib/errors';
 import { useAppearance, type Density, type Theme } from '../hooks/useTheme';
 import { getToolPrefs, setToolPrefs, useToolPrefs } from '../lib/toolPrefs';
@@ -668,6 +668,8 @@ function AgentsSection({
   onError: (s: string | null) => void;
 }) {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
+  const [caps, setCaps] = useState<CapabilitySpec[]>([]);
+  const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('worker');
@@ -677,8 +679,14 @@ function AgentsSection({
 
   const reload = useCallback(async () => {
     try {
-      const r = await api.listAgents(true);
-      setAgents(r.agents || []);
+      const [a, c, i] = await Promise.all([
+        api.listAgents(true),
+        api.listCapabilities(true),
+        api.getIntelligence(false),
+      ]);
+      setAgents(a.agents || []);
+      setCaps(c.capabilities || []);
+      setAgenda(i.agenda || []);
       onError(null);
     } catch (e) {
       onError(userMessage(e));
@@ -713,6 +721,48 @@ function AgentsSection({
 
   return (
     <div className="settings-stack">
+      <Card>
+        <CardHead>
+          Intelligence agenda ({agenda.length} open)
+          <Button
+            size="sm"
+            style={{ marginLeft: 12 }}
+            onClick={() => void api.tickIntelligence(true).then(() => { onFlash('Audit ran'); void reload(); }).catch((e) => onError(userMessage(e)))}
+          >
+            Reflect now
+          </Button>
+        </CardHead>
+        <CardBody>
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Harness audits gaps every chat turn and auto-acts safe fixes (forge recipes, seed tasks/memory).
+            High/critical items are injected into the model prompt so it pursues them without being asked.
+          </p>
+          {agenda.length === 0 && <p className="small muted">Agenda clear — hit Reflect now or chat to refresh.</p>}
+          <div className="col-stack">
+            {agenda.map((it) => (
+              <div key={it.id} className="agent-row">
+                <div className="agent-row-body">
+                  <div style={{ fontWeight: 600 }}>
+                    {it.title}{' '}
+                    <span className="mono muted" style={{ fontWeight: 400 }}>{it.priority} · {it.kind}</span>
+                  </div>
+                  {it.detail && <div className="small" style={{ marginTop: 4 }}>{it.detail}</div>}
+                  <div className="small muted mono">{it.id}</div>
+                </div>
+                <div className="agent-row-actions">
+                  <Button size="sm" onClick={() => void api.pursueAgenda(it.id).then(() => { onFlash('Pursued'); void reload(); }).catch((e) => onError(userMessage(e)))}>
+                    Pursue
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => void api.dismissAgenda(it.id, 'human dismiss').then(reload).catch((e) => onError(userMessage(e)))}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHead>New agent</CardHead>
         <CardBody>
@@ -776,6 +826,60 @@ function AgentsSection({
                   {a.status !== 'archived' && (
                     <Button size="sm" variant="ghost" onClick={() => void api.archiveAgent(a.id).then(reload).catch((e) => onError(userMessage(e)))}>
                       Archive
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHead>
+          Capability forge ({caps.filter((c) => c.status === 'installed').length} installed
+          {caps.some((c) => c.status === 'pending') ? `, ${caps.filter((c) => c.status === 'pending').length} pending` : ''})
+        </CardHead>
+        <CardBody>
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Agent-invented tools (composites of existing tools, or HTTP). Low-risk composites auto-install;
+            medium/high stay pending until you approve.
+          </p>
+          {caps.length === 0 && <p className="small muted">No forged capabilities yet — the agent uses propose_capability.</p>}
+          <div className="col-stack">
+            {caps.map((c) => (
+              <div
+                key={c.id}
+                className="agent-row"
+                style={{ opacity: c.status === 'retired' || c.status === 'rejected' ? 0.55 : 1 }}
+              >
+                <div className="agent-row-body">
+                  <div style={{ fontWeight: 600 }}>
+                    {c.name}{' '}
+                    <span className="mono muted" style={{ fontWeight: 400 }}>{c.kind} · {c.risk}</span>
+                  </div>
+                  <div className="small muted mono">{c.id} · {c.status} · {c.created_by || '—'}</div>
+                  {c.summary && <div className="small" style={{ marginTop: 4 }}>{c.summary}</div>}
+                  {(c.status === 'pending' || c.status === 'installed') && c.impl && (
+                    <pre className="mono small muted" style={{ marginTop: 6, maxHeight: 120, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                      {JSON.stringify({ risk: c.risk, kind: c.kind, impl: c.impl }, null, 2)}
+                    </pre>
+                  )}
+                </div>
+                <div className="agent-row-actions">
+                  {c.status === 'pending' && (
+                    <>
+                      <Button size="sm" onClick={() => void api.approveCapability(c.id).then(() => { onFlash('Capability installed'); void reload(); }).catch((e) => onError(userMessage(e)))}>
+                        Approve
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => void api.rejectCapability(c.id).then(reload).catch((e) => onError(userMessage(e)))}>
+                        Reject
+                      </Button>
+                    </>
+                  )}
+                  {c.status === 'installed' && (
+                    <Button size="sm" variant="ghost" onClick={() => void api.retireCapability(c.id).then(reload).catch((e) => onError(userMessage(e)))}>
+                      Retire
                     </Button>
                   )}
                 </div>

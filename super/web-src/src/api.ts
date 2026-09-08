@@ -23,6 +23,35 @@ export type AgentSpec = {
   updated?: string;
 };
 
+export type CapabilitySpec = {
+  id: string;
+  name: string;
+  summary?: string;
+  description?: string;
+  kind: string;
+  risk: string;
+  status: string;
+  group?: string;
+  impl?: Record<string, unknown>;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  test_report?: { ok?: boolean; ran?: number; passed?: number; failed?: number };
+};
+
+export type AgendaItem = {
+  id: string;
+  kind: string;
+  priority: string;
+  status: string;
+  title: string;
+  detail?: string;
+  action?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  result?: unknown;
+};
+
 export type MemoryClaim = {
   id: number;
   text: string;
@@ -230,6 +259,36 @@ class ApiService implements IApiService {
     requireId(id);
     requireNonEmpty(goal, 'goal');
     return http.request<{ ok: boolean; reply: string; span_id: string; run_id: string }>('/api/agent', 'POST', { id, action: 'run', goal });
+  }
+  listCapabilities(includeRetired = false) {
+    const q = includeRetired ? '?include_retired=1' : '';
+    return http.request<{ capabilities: CapabilitySpec[] }>(`/api/capabilities${q}`, 'GET');
+  }
+  approveCapability(id: string) {
+    requireId(id);
+    return http.request<{ ok: boolean; capability: CapabilitySpec }>('/api/capability', 'POST', { id, action: 'approve' });
+  }
+  rejectCapability(id: string, reason = '') {
+    requireId(id);
+    return http.request<{ ok: boolean; capability: CapabilitySpec }>('/api/capability', 'POST', { id, action: 'reject', reason });
+  }
+  retireCapability(id: string) {
+    requireId(id);
+    return http.request<{ ok: boolean; capability: CapabilitySpec }>('/api/capability', 'POST', { id, action: 'retire' });
+  }
+  getIntelligence(includeDone = false) {
+    const q = includeDone ? '?include_done=1' : '';
+    return http.request<{ agenda: AgendaItem[]; stats: Record<string, unknown>; briefing: string }>(`/api/intelligence${q}`, 'GET');
+  }
+  tickIntelligence(force = true) {
+    return http.request<{ ok: boolean; refresh?: unknown; auto_act?: unknown; briefing?: string }>('/api/intelligence', 'POST', { action: 'tick', force });
+  }
+  pursueAgenda(id?: string) {
+    return http.request<{ ok: boolean; item?: AgendaItem; result?: unknown; needs_model?: boolean; guidance?: string }>('/api/intelligence', 'POST', { action: 'pursue', id });
+  }
+  dismissAgenda(id: string, reason = '') {
+    requireId(id);
+    return http.request<{ ok: boolean; item: AgendaItem }>('/api/intelligence', 'POST', { action: 'dismiss', id, reason });
   }
   listMemory(opts: { q?: string; includeDead?: boolean; limit?: number; offset?: number } = {}) {
     const qs = new URLSearchParams();

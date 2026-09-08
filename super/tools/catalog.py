@@ -48,6 +48,14 @@ GROUPS: dict[str, dict[str, str]] = {
         "title": "Agents",
         "blurb": "Create and run specialized sub-agents (inherit parent rules)",
     },
+    "capabilities": {
+        "title": "Capabilities",
+        "blurb": "Propose, test, install agent-invented tools (capability forge)",
+    },
+    "intelligence": {
+        "title": "Intelligence",
+        "blurb": "Autonomous agenda: audit gaps, pursue improvements, self-reflect",
+    },
 }
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -379,6 +387,142 @@ _reg(ToolSpec(
     keywords="spawn subagent delegate",
 ))
 
+# ── capabilities (self-extending forge) ───────────────────────────────
+def _propose_cap_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_propose_capability(cfg, args)
+
+def _list_caps_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_list_capabilities(cfg, args)
+
+def _describe_cap_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_describe_capability(cfg, args)
+
+def _test_cap_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_test_capability(cfg, args)
+
+def _install_cap_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_install_capability(cfg, args)
+
+def _retire_cap_handler(cfg: dict, args: dict):
+    from .. import capabilities as C
+    return C.handle_retire_capability(cfg, args)
+
+_reg(ToolSpec(
+    "propose_capability", "capabilities", "Invent a new tool",
+    "Propose a new capability (composite of existing tools, or HTTP). "
+    "Low-risk composites with passing tests auto-install; others stay pending "
+    "until human approval. Does NOT eval arbitrary code — compose trusted tools.",
+    _props(
+        name=_str("snake_case tool name", req=True),
+        summary=_str("One-line summary"),
+        description=_str("Full description for the catalog"),
+        kind=_str("composite|http", **{"default": "composite"}),
+        risk=_str("low|medium|high", **{"default": "medium"}),
+        parameters={"type": "object", "description": "JSON Schema for the new tool's args"},
+        impl={"type": "object", "description": "composite: {steps:[{tool,args,as}], merge}; http: {url,method,query_from,body_from}"},
+        tests={"type": "array", "items": {"type": "object"}, "description": "Optional [{args, expect_ok, expect_contains}]"},
+    ),
+    _propose_cap_handler,
+    risk="high",
+    discovery=True,
+    keywords="forge invent extend self-modify capability tool",
+))
+_reg(ToolSpec(
+    "list_capabilities", "capabilities", "List forged capabilities",
+    "List pending/installed/retired agent-invented capabilities.",
+    _props(include_retired=_bool("Include retired")),
+    _list_caps_handler,
+    discovery=True,
+    keywords="forge capabilities",
+))
+_reg(ToolSpec(
+    "describe_capability", "capabilities", "Describe one capability",
+    "Show full capability record (impl, tests, status).",
+    _props(id=_str("Capability id"), name=_str("Capability tool name")),
+    _describe_cap_handler,
+    discovery=True,
+))
+_reg(ToolSpec(
+    "test_capability", "capabilities", "Run capability tests",
+    "Execute the capability's test cases (sandbox: blocks write tools unless risk=low).",
+    _props(id=_str("Capability id", req=True)),
+    _test_cap_handler,
+    risk="medium",
+    discovery=True,
+))
+_reg(ToolSpec(
+    "install_capability", "capabilities", "Install approved capability",
+    "Register an approved (or auto-eligible low-risk) capability into the live tool catalog.",
+    _props(id=_str("Capability id", req=True)),
+    _install_cap_handler,
+    risk="high",
+    discovery=True,
+))
+_reg(ToolSpec(
+    "retire_capability", "capabilities", "Retire a capability",
+    "Unregister and retire a capability (tighten only).",
+    _props(id=_str("Capability id", req=True)),
+    _retire_cap_handler,
+    risk="medium",
+    discovery=True,
+))
+
+# ── intelligence (autonomous agenda) ──────────────────────────────────
+def _self_reflect_handler(cfg: dict, args: dict):
+    from .. import intelligence as I
+    return I.handle_self_reflect(cfg, args)
+
+def _list_agenda_handler(cfg: dict, args: dict):
+    from .. import intelligence as I
+    return I.handle_list_agenda(cfg, args)
+
+def _pursue_agenda_handler(cfg: dict, args: dict):
+    from .. import intelligence as I
+    return I.handle_pursue_agenda(cfg, args)
+
+def _dismiss_agenda_handler(cfg: dict, args: dict):
+    from .. import intelligence as I
+    return I.handle_dismiss_agenda(cfg, args)
+
+_reg(ToolSpec(
+    "self_reflect", "intelligence", "Audit gaps and refresh agenda",
+    "Run the autonomous intelligence audit: scan tasks, gates, memory, capabilities, "
+    "agents, config; refresh the agenda; auto-act safe improvements (forge recipes, "
+    "seed tasks/memory). Call when stuck or at the start of ambitious work.",
+    _props(force=_bool("Bypass rate limit")),
+    _self_reflect_handler,
+    discovery=True,
+    keywords="reflect audit agenda improve metacognition",
+))
+_reg(ToolSpec(
+    "list_agenda", "intelligence", "List intelligence agenda",
+    "Show open (or all) agenda items the harness wants pursued.",
+    _props(include_done=_bool("Include done/dismissed")),
+    _list_agenda_handler,
+    discovery=True,
+))
+_reg(ToolSpec(
+    "pursue_agenda", "intelligence", "Act on an agenda item",
+    "Force-run the auto-actor for an agenda id, or get guidance if the model must handle it. "
+    "Omit id to pursue the top open item.",
+    _props(id=_str("Agenda item id (optional — top item if omitted)")),
+    _pursue_agenda_handler,
+    risk="medium",
+    discovery=True,
+))
+_reg(ToolSpec(
+    "dismiss_agenda", "intelligence", "Dismiss an agenda item",
+    "Mark an agenda item done/dismissed after you addressed it (or as not applicable).",
+    _props(id=_str("Agenda item id", req=True), reason=_str("Why dismissed")),
+    _dismiss_agenda_handler,
+    discovery=True,
+))
+
 
 def get_tool(name: str) -> ToolSpec | None:
     return TOOLS.get(name)
@@ -505,6 +649,9 @@ def default_tools_config() -> dict:
             "tasks": True,
             "memory": True,
             "project": True,
+            "agents": True,
+            "capabilities": True,
+            "intelligence": True,
         },
         "disabled": [],
         "packs": default_packs_config(),

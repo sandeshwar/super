@@ -54,6 +54,23 @@ export type AgentSpec = {
   created?: string;
   updated?: string;
 };
+export type CapabilitySpec = {
+  id: string;
+  name: string;
+  summary?: string;
+  description?: string;
+  kind: string;
+  risk: string;
+  status: string;
+  group?: string;
+  parameters?: Record<string, unknown>;
+  impl?: Record<string, unknown>;
+  tests?: unknown[];
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+  test_report?: { ok?: boolean; ran?: number; passed?: number; failed?: number; detail?: unknown };
+};
 export type MemoryClaim = {
   id: number;
   text: string;

@@ -835,6 +835,11 @@ def ensure_bridge(cfg: dict) -> None:
         _register_pack_meta_tools()
     register_lazy_stubs(cfg)
     sync_enabled_packs(cfg)
+    try:
+        from .. import capabilities as _caps
+        _caps.ensure_capabilities(cfg)
+    except Exception:
+        pass
 
 
 def _register_pack_meta_tools() -> None:

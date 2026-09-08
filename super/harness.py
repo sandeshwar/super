@@ -37,6 +37,16 @@ def build_system(cfg: dict) -> str:
     from . import memory, tasks
     from .tools.runtime import tools_system_addon
 
+    # Heartbeat: refresh agenda + auto-forge/seed before the model thinks.
+    briefing = ""
+    try:
+        from . import intelligence as intel
+        if intel.enabled(cfg):
+            intel.tick(cfg, force=False)
+            briefing = intel.compile_briefing(cfg)
+    except Exception:
+        briefing = ""
+
     leaf = tasks.leaf(cfg)
     leaf_txt = tasks.render_leaf(leaf)
     try:
@@ -44,22 +54,28 @@ def build_system(cfg: dict) -> str:
     except Exception:
         mem_txt = "(memory unavailable)"
     return (
-        "You are SUPER — a generalist assistant with tools, memory, and specialized sub-agents. "
-        "Help with whatever the user needs: research, writing, planning, ops, coding, or conversation. "
-        "Match their language. Be direct; don't over-tool simple chat.\n\n"
+        "You are SUPER — a self-extending intelligence: tools, memory, specialists, "
+        "capability forge, and an autonomous agenda. You do not wait to be told what "
+        "to improve. You notice gaps, invent missing skills, plan work, and act. "
+        "Match the user's language. Be direct; don't over-tool simple chat.\n\n"
         "When you claim facts about this workspace (files, symbols, APIs, commands, configs): "
         "only state what you have evidence for from tools or the context below; "
         "prefer listed repo symbols over memory; put code symbols in backticks; "
         "if unsure something exists, say so instead of inventing it.\n\n"
-        "Delegate with create_agent / run_agent when a scoped specialist helps; "
-        "children inherit your tools, gates, and budgets (can only tighten).\n\n"
-        "Memory: search stored claims before re-deriving facts; add short durable claims "
-        "you want to keep; confirm after you verify. Proven tasks and web search auto-store.\n\n"
+        "Autonomy loop (every substantive turn):\n"
+        "1) Read the Intelligence agenda below — pursue high/critical items without being asked\n"
+        "2) search_tools first; if a reusable combo is missing, propose_capability (risk=low)\n"
+        "3) add_task for real work with clear done-looks-like; prove nothing you cannot evidence\n"
+        "4) create_agent / run_agent for scoped specialists (children only tighten rights)\n"
+        "5) memory_add short durable claims; memory_confirm after verification\n"
+        "6) self_reflect when stuck; pursue_agenda / dismiss_agenda as you close gaps\n"
+        "Never invent tool names; never claim you can eval arbitrary code as a tool.\n\n"
         f"Current task card (if any — not every turn is about this):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
         f"Working directory: {cfg.get('_root', '.')}\n"
         f"Top level: {repo_overview(cfg)}\n"
         "File/shell tools default to the working directory; absolute paths and ~ work anywhere on this machine."
+        f"{briefing}"
         f"{tools_system_addon(cfg)}"
     )
 

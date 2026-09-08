@@ -186,6 +186,25 @@ class Handler(BaseHTTPRequestHandler):
             from . import agents as _agents
             include = (q.get("include_archived", ["0"])[0] or "0") in ("1", "true", "yes")
             return self._send_json({"agents": _agents.list_agents(CFG, include_archived=include)})
+        if u.path == "/api/capabilities":
+            from . import capabilities as _caps
+            include = (q.get("include_retired", ["0"])[0] or "0") in ("1", "true", "yes")
+            return self._send_json({"capabilities": _caps.list_capabilities(CFG, include_retired=include)})
+        if u.path == "/api/intelligence":
+            from . import intelligence as _intel
+            return self._send_json({
+                "agenda": _intel.list_agenda(CFG, include_done=(q.get("include_done", ["0"])[0] or "0") in ("1", "true", "yes")),
+                "stats": _intel.stats(CFG),
+                "briefing": _intel.compile_briefing(CFG),
+            })
+        if u.path == "/api/capability":
+            from . import capabilities as _caps
+            cid = (q.get("id", [""])[0] or "").strip()
+            name = (q.get("name", [""])[0] or "").strip()
+            cap = _caps.get_capability(CFG, cid or None, name=name or None)
+            if not cap:
+                return self._send_json({"error": "no such capability", "code": 404}, 404)
+            return self._send_json({"capability": cap})
         if u.path == "/api/memory":
             from . import memory as _mem
             query = (q.get("q", [""])[0] or q.get("query", [""])[0] or "").strip()
@@ -441,6 +460,76 @@ class Handler(BaseHTTPRequestHandler):
                         force_active=True,
                     )
                     return self._send_json({"ok": True, "agent": spec})
+                except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/capabilities":
+                from . import capabilities as _caps
+                from .errors import StoreError as _SE
+                try:
+                    cap = _caps.propose(
+                        CFG,
+                        name=str(body.get("name") or ""),
+                        summary=str(body.get("summary") or ""),
+                        description=str(body.get("description") or ""),
+                        kind=str(body.get("kind") or "composite"),
+                        risk=str(body.get("risk") or "medium"),
+                        parameters=body.get("parameters") if isinstance(body.get("parameters"), dict) else None,
+                        impl=body.get("impl") if isinstance(body.get("impl"), dict) else None,
+                        tests=body.get("tests") if isinstance(body.get("tests"), list) else None,
+                        created_by="user",
+                    )
+                    return self._send_json({"ok": True, "capability": cap})
+                except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/intelligence":
+                from . import intelligence as _intel
+                from .errors import StoreError as _SE
+                action = str(body.get("action") or "tick").strip().lower()
+                try:
+                    if action in ("tick", "reflect", "audit"):
+                        result = _intel.tick(CFG, force=bool(body.get("force", True)))
+                        return self._send_json({"ok": True, **result})
+                    if action == "pursue":
+                        iid = str(body.get("id") or "").strip()
+                        if not iid:
+                            items = _intel.list_agenda(CFG)
+                            if not items:
+                                return self._send_json({"ok": True, "empty": True})
+                            iid = items[0]["id"]
+                        result = _intel.pursue(CFG, iid)
+                        return self._send_json({"ok": True, **result})
+                    if action == "dismiss":
+                        item = _intel.dismiss(CFG, str(body.get("id") or ""), reason=str(body.get("reason") or ""))
+                        return self._send_json({"ok": True, "item": item})
+                    return self._send_json({"error": f"unknown action {action}", "code": 400}, 400)
+                except KeyError:
+                    return self._send_json({"error": "no such agenda item", "code": 404}, 404)
+                except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/capability":
+                from . import capabilities as _caps
+                from .errors import StoreError as _SE
+                cid = str(body.get("id") or "").strip()
+                if not cid:
+                    return self._send_json({"error": "id required", "code": 400}, 400)
+                action = str(body.get("action") or "approve").strip().lower()
+                try:
+                    if action == "approve":
+                        cap = _caps.approve(CFG, cid, actor="user")
+                    elif action == "reject":
+                        cap = _caps.reject(CFG, cid, actor="user", reason=str(body.get("reason") or ""))
+                    elif action == "install":
+                        cap = _caps.install(CFG, cid, actor="user", require_approved=True)
+                    elif action == "retire":
+                        cap = _caps.retire(CFG, cid, actor="user")
+                    elif action == "test":
+                        report = _caps.run_tests(CFG, cid)
+                        return self._send_json({"ok": bool(report.get("ok")), "report": report})
+                    else:
+                        return self._send_json({"error": f"unknown action {action}", "code": 400}, 400)
+                    return self._send_json({"ok": True, "capability": cap})
+                except KeyError:
+                    return self._send_json({"error": "no such capability", "code": 404}, 404)
                 except (ValueError, _SE) as e:
                     return self._send_json({"error": str(e), "code": 400}, 400)
             if path_no_q == "/api/memory":
@@ -918,5 +1007,5 @@ def serve(cfg: dict) -> None:
     print(f"  local:  http://127.0.0.1:{port}/")
     for u in _lan_urls(port):
         print(f"  lan:    {u}")
-    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans /api/memory /api/fs/pick")
+    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/capabilities /api/intelligence /api/spans /api/memory /api/fs/pick")
     httpd.serve_forever()

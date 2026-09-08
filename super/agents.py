@@ -733,7 +733,7 @@ def can_call_tool(cfg: dict, name: str) -> tuple[bool, str]:
     allow = eff.get("tools")
     if isinstance(allow, list):
         # discovery meta-tools always allowed if discovery group on
-        from .catalog import get_tool
+        from .tools.catalog import get_tool
         spec = get_tool(name)
         if spec and spec.discovery:
             return True, ""
@@ -744,6 +744,11 @@ def can_call_tool(cfg: dict, name: str) -> tuple[bool, str]:
             return False, "agent may_manage_agents=false"
         if name == "run_agent" and not eff.get("may_spawn", True):
             return False, "agent may_spawn=false"
+    if name in (
+        "propose_capability", "install_capability", "retire_capability",
+        "test_capability",
+    ) and not eff.get("may_manage_agents", True):
+        return False, "agent may_manage_agents=false"
     return True, ""
 
 
