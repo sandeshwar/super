@@ -32,10 +32,6 @@ GROUPS: dict[str, dict[str, str]] = {
         "title": "Web",
         "blurb": "Fetch URLs (marked untrusted)",
     },
-    "tasks": {
-        "title": "Tasks",
-        "blurb": "Read and update the task graph",
-    },
     "memory": {
         "title": "Memory",
         "blurb": "Store and recall verified claims",
@@ -260,20 +256,6 @@ _reg(ToolSpec("fetch_url", "web", "Fetch a URL",
               _props(url=_str("http(s) URL", req=True), timeout_s=_int("Timeout", **{"default": 15})),
               B.fetch_url, risk="medium", keywords="http url fetch download page"))
 
-# ── tasks ─────────────────────────────────────────────────────────────
-_reg(ToolSpec("list_tasks", "tasks", "List tasks",
-              "List task cards, optionally filtered by status.",
-              _props(status=_str("Optional status filter")), B.list_tasks))
-_reg(ToolSpec("get_task", "tasks", "Get one task",
-              "Fetch a task card by id.",
-              _props(id=_str("Task id", req=True)), B.get_task))
-_reg(ToolSpec("add_task", "tasks", "Add a task",
-              "Create a new task card.",
-              _props(title=_str("What to do", req=True),
-                     parent=_str("Parent task id"),
-                     done_looks_like=_str("How we know it's done")),
-              B.add_task, risk="medium"))
-
 # ── memory ────────────────────────────────────────────────────────────
 _reg(ToolSpec("memory_search", "memory", "Search memory",
               "Search stored claims / context related to a query.",
@@ -282,7 +264,6 @@ _reg(ToolSpec("memory_add", "memory", "Remember a claim",
               "Store a short verified claim for later context.",
               _props(claim=_str("Claim text", req=True),
                      source=_str("Provenance label"),
-                     task_id=_str("Related task id"),
                      verification=_str("unverified | verified | human")),
               B.memory_add, risk="medium"))
 _reg(ToolSpec("memory_confirm", "memory", "Confirm a claim",
@@ -572,9 +553,9 @@ def _dismiss_agenda_handler(cfg: dict, args: dict):
 
 _reg(ToolSpec(
     "self_reflect", "intelligence", "Audit gaps and refresh agenda",
-    "Run the autonomous intelligence audit: scan tasks, gates, memory, capabilities, "
+    "Run the autonomous intelligence audit: scan gates, memory, capabilities, "
     "agents, config; refresh the agenda; auto-act safe improvements (forge recipes, "
-    "seed tasks/memory). Call when stuck or at the start of ambitious work.",
+    "seed memory). Call when stuck or at the start of ambitious work.",
     _props(force=_bool("Bypass rate limit")),
     _self_reflect_handler,
     discovery=True,
@@ -828,7 +809,6 @@ def default_tools_config() -> dict:
             "shell": True,
             "git": True,
             "web": False,
-            "tasks": True,
             "memory": True,
             "project": True,
             "agents": True,

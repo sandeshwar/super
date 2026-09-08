@@ -44,83 +44,6 @@ def cmd_chat(args, cfg):
     print(llm.ask(cfg, args.prompt, system=args.system))
 
 
-def cmd_task_add(args, cfg):
-    from super import tasks
-
-    try:
-        needs = [x for x in (args.needs or []) if x and x.strip()]
-        blocks = [x for x in (getattr(args, 'blocks', None) or []) if x and x.strip()]
-        files = [x for x in (getattr(args, 'files', None) or []) if x and x.strip()]
-        nid = tasks.add(cfg, args.title, done=args.done or "",
-                        needs=needs, parent=args.parent, why=args.why or "",
-                        blocks=blocks, files=files)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out({"id": nid}, args.json, f"task {nid} added")
-
-
-def cmd_task_list(args, cfg):
-    from super import tasks
-
-    rows = tasks.list_all(cfg)
-    if args.json:
-        print(json.dumps(rows, indent=2))
-    else:
-        for n in rows:
-            print(f"[{n['id']}] {n['status']:8s} {n['title']}")
-
-
-def cmd_task_leaf(args, cfg):
-    from super import tasks
-
-    _out({"leaf": tasks.leaf(cfg)}, args.json, tasks.render_leaf(tasks.leaf(cfg)))
-
-
-def cmd_task_prove(args, cfg):
-    from super import tasks
-
-    try:
-        tasks.prove(cfg, args.id, args.proof)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out({"ok": True}, args.json, f"task {args.id} proven")
-
-
-def cmd_task_status(args, cfg):
-    from super import tasks
-
-    try:
-        n = tasks.set_status(cfg, args.id, args.status)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out(n, args.json, f"task {args.id} -> {args.status}")
-
-
-def cmd_task_rollback(args, cfg):
-    from super import tasks
-
-    try:
-        reopened = tasks.rollback(cfg, args.to)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out({"reopened": reopened}, args.json, f"rolled back: {', '.join(reopened) or 'nothing to reopen'}")
-
-
-def cmd_task_search(args, cfg):
-    from super import tasks
-
-    rows = tasks.search(cfg, args.query)
-    if args.json:
-        print(json.dumps(rows, indent=2))
-    else:
-        for n in rows:
-            print(f"[{n['id']}] {n['status']:8s} {n['title']}")
-
-
 def cmd_gate_check(args, cfg):
     from super import gates
 
@@ -149,39 +72,37 @@ def cmd_write_check(args, cfg):
 
 
 def cmd_status(args, cfg):
-    from super import ledger, tasks
+    from super import ledger
 
     payload = {"model": f"{cfg['llm']['model']} @ {cfg['llm']['endpoint']}",
                "gates": ledger.gate_stats(cfg), "catch_rates": ledger.catch_rates(cfg),
-               "open_criticals": len(ledger.open_criticals(cfg)), "tasks": tasks.stats(cfg)}
+               "open_criticals": len(ledger.open_criticals(cfg))}
     _out(payload, args.json,
          f"model: {payload['model']}\ngates: {json.dumps(payload['gates'])}\n"
-         f"open criticals: {payload['open_criticals']}\ntasks: {payload['tasks']}")
+         f"open criticals: {payload['open_criticals']}")
 
 
 def cmd_report(args, cfg):
-    from super import ledger, quality, tasks
+    from super import ledger, quality
 
-    all_tasks = tasks.list_all(cfg)
     done_ok, blockers = quality.done_state(cfg)
-    payload = {"tasks": all_tasks, "proven": sum(1 for t in all_tasks if t["status"] == "proven"),
-               "total": len(all_tasks), "gates": ledger.gate_stats(cfg),
+    payload = {"gates": ledger.gate_stats(cfg),
                "catch_rates": ledger.catch_rates(cfg), "open_criticals": ledger.open_criticals(cfg),
                "done_ok": done_ok, "done_blockers": blockers}
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"Done: {payload['proven']}/{payload['total']} proven — {'READY' if done_ok else 'BLOCKED'}")
+        print(f"Done-state: {'READY' if done_ok else 'BLOCKED'}")
         for b in blockers:
             print(f"  ! {b}")
         print(f"gates: {json.dumps(payload['gates'])}")
 
 
 def cmd_metrics(args, cfg):
-    from super import ledger, tasks, trust
+    from super import ledger, trust
     from super import security as sec
 
-    payload = {"tasks": tasks.stats(cfg), "ledger": ledger.report(cfg),
+    payload = {"ledger": ledger.report(cfg),
                "fatigue": trust.fatigue(cfg), "sink": sec.sink_audit(cfg)}
     print(json.dumps(payload, indent=2))
 
@@ -221,19 +142,6 @@ def cmd_dep_check(args, cfg):
     _out({"ok": True}, args.json, f"PASS: {msg}")
 
 
-def cmd_spec_pin(args, cfg):
-    from super import spec as specmod
-    from super import tasks
-
-    task = tasks.get(cfg, args.id)
-    try:
-        s = specmod.pin_spec(cfg, task, args.acceptance or [])
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out(s, args.json, f"spec pinned for {args.id}: {len(s['acceptance'])} checks")
-
-
 def cmd_verify(args, cfg):
     from super import verify as vermod
 
@@ -256,11 +164,9 @@ def cmd_memory(args, cfg):
     from super import memory as mem
 
     if args.op == "remember":
-        print(json.dumps(mem.remember(cfg, args.text, task_id=args.task or ""), indent=2))
+        print(json.dumps(mem.remember(cfg, args.text), indent=2))
     elif args.op == "context":
-        from super import tasks
-
-        print(mem.compile_context(cfg, tasks.leaf(cfg)))
+        print(mem.compile_context(cfg))
 
 
 def cmd_trust(args, cfg):
@@ -268,7 +174,7 @@ def cmd_trust(args, cfg):
 
     if args.op == "route":
         decision, radius, reason = trustmod.route(cfg, args.files or [], int(args.loc or 0),
-                                                  proven_record=args.proven)
+                                                  track_record=args.track_record)
         print(json.dumps({"decision": decision, "blast_radius": radius, "reason": reason}, indent=2))
     elif args.op == "fatigue":
         print(json.dumps(trustmod.fatigue(cfg), indent=2))
@@ -307,17 +213,6 @@ def cmd_replay(args, cfg):
         print(json.dumps({"candidates": meta.descent_candidates(cfg)}, indent=2))
 
 
-def cmd_approve(args, cfg):
-    from super import ledger, tasks, trust
-    try:
-        tasks.prove(cfg, args.id, f"human-approved: {args.note or ''}")
-        ledger.log_gate(cfg, "human", "F7", "pass", detail=f"approved {args.id}")
-        trust.record_approval(cfg, "approve", True)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out({"ok": True, "id": args.id}, args.json, f"approved {args.id}")
-
 def cmd_waive(args, cfg):
     from super import ledger
     import re as _re, datetime as _dt
@@ -345,6 +240,7 @@ def cmd_waive(args, cfg):
     ledger.log_gate(cfg, "waiver", "F7", "pass", detail=text[:200])
     _out({"ok": True}, args.json, f"waived: {text[:60]} (expires {expires})")
 
+
 def cmd_ledger(args, cfg):
     from super import ledger
     payload = {"gates": ledger.gate_stats(cfg), "catch_rates": ledger.catch_rates(cfg),
@@ -354,41 +250,6 @@ def cmd_ledger(args, cfg):
     else:
         print(json.dumps(payload, indent=2))
 
-def cmd_tree(args, cfg):
-    from super import tasks
-    import json as _j
-    payload = {"tasks": tasks.list_all(cfg), "tree": tasks.to_tree(cfg)}
-    if args.json:
-        print(_j.dumps(payload, indent=2))
-    else:
-        # human view: indented tree
-        def show(nodes, depth=0):
-            for n in nodes:
-                cs = n.get("status", "?")
-                print(f"{'  '*depth}- [{n['id']}] {cs:8s} {n['title']}")
-                if n.get("children"):
-                    show(n["children"], depth+1)
-        show(payload["tree"])
-
-def cmd_job(args, cfg):
-    from super import tasks
-    try:
-        n = tasks.get(cfg, args.id)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out(n, args.json, json.dumps(n, indent=2))
-
-def cmd_rollback_alias(args, cfg):
-    # alias for task-rollback but also supports --id
-    from super import tasks
-    pivot = getattr(args, 'id', None) or getattr(args, 'to', None)
-    try:
-        reopened = tasks.rollback(cfg, pivot)
-    except SuperError as e:
-        print(f"error: {e}", file=sys.stderr)
-        sys.exit(EXIT_USAGE)
-    _out({"reopened": reopened}, args.json, f"rolled back to {pivot}: {', '.join(reopened) or 'nothing'}")
 
 def cmd_serve(args, cfg):
     from super import server
@@ -409,41 +270,13 @@ def main(argv=None) -> None:
     p = sub.add_parser("chat")
     p.add_argument("prompt")
     p.add_argument("--system", default=None)
-    p = sub.add_parser("task-add")
-    p.add_argument("title")
-    p.add_argument("--done", default="")
-    p.add_argument("--why", default="")
-    p.add_argument("--needs", nargs="*", default=[])
-    p.add_argument("--parent", default=None)
-    p.add_argument("--blocks", nargs="*", default=[])
-    p.add_argument("--files", nargs="*", default=[])
-    sub.add_parser("task-list")
-    sub.add_parser("task-leaf")
-    p = sub.add_parser("task-prove")
-    p.add_argument("id")
-    p.add_argument("proof")
-    p = sub.add_parser("task-status")
-    p.add_argument("id")
-    p.add_argument("status", choices=["waiting", "doing", "proven", "blocked"])
-    p = sub.add_parser("task-rollback")
-    p.add_argument("--to", required=True)
-    p = sub.add_parser("approve")
-    p.add_argument("id")
-    p.add_argument("--note", default="")
     p = sub.add_parser("waive")
     p.add_argument("text")
     p.add_argument("--expires", required=True, help="YYYY-MM-DD — no permanent bypass")
     p.add_argument("--owner", default="human")
     p.add_argument("--severity", default="minor")
     p.add_argument("--layer", default="waiver")
-    p = sub.add_parser("rollback")
-    p.add_argument("id", help="pivot task id to rollback to")
     sub.add_parser("ledger")
-    sub.add_parser("tree")
-    p = sub.add_parser("job")
-    p.add_argument("id")
-    p = sub.add_parser("task-search")
-    p.add_argument("query")
     p = sub.add_parser("gate-check")
     p.add_argument("symbols", nargs="+")
     p = sub.add_parser("write-check")
@@ -459,9 +292,6 @@ def main(argv=None) -> None:
     p.add_argument("name")
     p.add_argument("--version", default="")
     p.add_argument("--license", default="")
-    p = sub.add_parser("spec-pin")
-    p.add_argument("id")
-    p.add_argument("acceptance", nargs="+")
     p = sub.add_parser("verify")
     p.add_argument("what", choices=["syntax", "mutation"])
     p.add_argument("--file", default="")
@@ -470,12 +300,11 @@ def main(argv=None) -> None:
     p = sub.add_parser("memory")
     p.add_argument("op", choices=["remember", "context"])
     p.add_argument("--text", default="")
-    p.add_argument("--task", default="")
     p = sub.add_parser("trust")
     p.add_argument("op", choices=["route", "fatigue", "tier"])
     p.add_argument("--files", nargs="*", default=[])
     p.add_argument("--loc", default="0")
-    p.add_argument("--proven", action="store_true")
+    p.add_argument("--track-record", action="store_true")
     p.add_argument("--agent", default="default")
     p.add_argument("--area", default="general")
     p = sub.add_parser("ambition")
@@ -499,18 +328,14 @@ def main(argv=None) -> None:
         print(f"config error: {e}", file=sys.stderr)
         sys.exit(EXIT_CONFIG)
     {
-        "init": cmd_init, "chat": cmd_chat, "task-add": cmd_task_add,
-        "task-list": cmd_task_list, "task-leaf": cmd_task_leaf,
-        "task-prove": cmd_task_prove, "task-status": cmd_task_status,
-        "task-rollback": cmd_task_rollback, "task-search": cmd_task_search,
+        "init": cmd_init, "chat": cmd_chat,
         "gate-check": cmd_gate_check, "write-check": cmd_write_check,
         "status": cmd_status, "report": cmd_report, "metrics": cmd_metrics,
         "secret-scan": cmd_secret_scan, "sast": cmd_sast, "dep-check": cmd_dep_check,
-        "spec-pin": cmd_spec_pin, "verify": cmd_verify, "memory": cmd_memory,
+        "verify": cmd_verify, "memory": cmd_memory,
         "trust": cmd_trust, "ambition": cmd_ambition, "replay": cmd_replay,
         "serve": cmd_serve, "token": cmd_token,
-        "approve": cmd_approve, "waive": cmd_waive, "ledger": cmd_ledger,
-        "tree": cmd_tree, "job": cmd_job, "rollback": cmd_rollback_alias,
+        "waive": cmd_waive, "ledger": cmd_ledger,
     }[args.cmd](args, cfg)
 
 

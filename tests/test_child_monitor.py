@@ -16,13 +16,13 @@ class TestChildAgentMonitor(unittest.TestCase):
         self.cfg["tools"]["runtime"] = "stdlib"
         self.cfg["tools"]["groups"] = {
             "files": True, "search": True, "shell": True, "git": True,
-            "web": True, "tasks": True, "memory": True, "project": True, "agents": True,
+            "web": True, "memory": True, "project": True, "agents": True,
         }
         self.cfg["agents"] = {
             "enabled": True, "max_depth": 3, "max_agents": 50,
             "allow_agent_create_roles": ["worker", "planner"],
         }
-        self.cfg["envelope"] = {"max_steps_per_task": 8}
+        self.cfg["envelope"] = {"max_tool_steps": 8}
 
     def tearDown(self):
         import shutil

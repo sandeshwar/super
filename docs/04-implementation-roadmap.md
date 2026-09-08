@@ -6,7 +6,7 @@ Build order = evidence-per-effort: nothing ships before the measurement exists t
 
 1. Production event ledger (tool traces, gate passes + rejects, session outcomes).
 2. Collect 30–50 failed sessions; label failure class (doc 01 F1–F10); mark which hypothetical gate would have caught each at which step.
-3. Measure competence envelope: largest edit the target (small) model does reliably with full context — sets max microtask size and default Best-of-N depth.
+3. Measure competence envelope: largest edit the target (small) model does reliably with full context — sets max reply size and default Best-of-N depth.
 4. Output: catch-rate matrix = build list *and* falsifier. If hypothesized gates catch < threshold, the thesis is wrong for this corpus — change the docs.
 
 Phase 0 never ends; it becomes the live accounting + descent input.
@@ -14,9 +14,9 @@ Phase 0 never ends; it becomes the live accounting + descent input.
 ## Core enforcement: grounding + spec + verification
 
 1. Grounding gate (doc 03 §1) — unobserved symbol → reject.
-2. Task graph (doc 02 §2) — parent/child + depends-on + proof link; model sees one leaf only.
-3. Spec pinning + drift probe (doc 03 §4) — failing acceptance tests required; isolated probe per subtask grounded in diffs.
-4. Ladder + mutation (doc 03 §3) — local type/lint per edit, subset per subtask, full + N-run per commit; vacuous tests rejected.
+2. Agenda + tool-steered planning (doc 02 §2) — durable priorities without stuffing the full plan into context.
+3. Acceptance checks + drift probe (doc 03 §4) — failing checks required; probes grounded in diffs.
+4. Ladder + mutation (doc 03 §3) — local type/lint per edit, focused tests, full + N-run per commit; vacuous tests rejected.
 
 Metrics: acceptance rate ↑, first-pass ↑, session length ↓, hallucinated-import → 0, vacuous-catch rate, drift hits/session.
 

@@ -22,10 +22,10 @@ class TestMemory(unittest.TestCase):
         try:
             c = M.remember(cfg, "repo uses ruff", source="human", verification="verified")
             self.assertIn("id", c)
-            ctx = M.compile_context(cfg, {"id": "1"})
+            ctx = M.compile_context(cfg)
             self.assertIn("ruff", ctx)
             M.supersede(cfg, claim_id=c["id"], replacement="repo uses oxlint now")
-            ctx2 = M.compile_context(cfg, {"id": "1"})
+            ctx2 = M.compile_context(cfg)
             self.assertNotIn("ruff", ctx2)
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -54,21 +54,6 @@ class TestMemory(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_auto_from_proof(self):
-        from super import memory as M
-        from super import tasks as T
-
-        cfg, root = make_cfg()
-        try:
-            nid = T.add(cfg, "wire memory auto-capture", done="tests pass")
-            T.prove(cfg, nid, "tests/test_system.py::TestMemory")
-            hits = M.search(cfg, "auto-capture")
-            self.assertTrue(hits)
-            self.assertEqual(hits[0]["verification"], "verified")
-            self.assertEqual(hits[0]["source"], "prove")
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
 
 class TestTrust(unittest.TestCase):
     def test_routing(self):
@@ -76,10 +61,10 @@ class TestTrust(unittest.TestCase):
 
         cfg, root = make_cfg()
         try:
-            d, r, _ = T.route(cfg, ["src/auth/login.py"], 50, proven_record=True)
+            d, r, _ = T.route(cfg, ["src/auth/login.py"], 50, track_record=True)
             self.assertEqual(d, "human-required")
             self.assertGreaterEqual(r, 3)
-            d2, _, _ = T.route(cfg, ["docs/readme.md"], 5, proven_record=True)
+            d2, _, _ = T.route(cfg, ["docs/readme.md"], 5, track_record=True)
             self.assertEqual(d2, "auto-pass")
         finally:
             shutil.rmtree(root, ignore_errors=True)
@@ -207,7 +192,21 @@ class TestServer(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status, json.loads(r.read().decode())
 
-    def test_health_tree_report_metrics(self):
+    def _post(self, base, path, body, token=""):
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(
+            f"{base}{path}",
+            data=data,
+            headers={
+                "Content-Type": "application/json",
+                **({"Authorization": f"Bearer {token}"} if token else {}),
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read().decode())
+
+    def test_health_report_metrics(self):
         import super.server as SV  # noqa: F401
 
         cfg, root = make_cfg()
@@ -219,16 +218,69 @@ class TestServer(unittest.TestCase):
                 with urllib.request.urlopen(f"{base}/api/health", timeout=5) as r:
                     self.assertEqual(r.status, 200)
                 # open local API — no auth
-                for path in ("/api/tree", "/api/ledger", "/api/report", "/api/metrics"):
+                for path in ("/api/ledger", "/api/report", "/api/metrics"):
                     code, body = self._get(base, path, token="")
                     self.assertEqual(code, 200)
                     self.assertIsInstance(body, dict)
-                # no token still works
-                with urllib.request.urlopen(f"{base}/api/tree", timeout=5) as r:
+                with urllib.request.urlopen(f"{base}/api/report", timeout=5) as r:
                     self.assertEqual(r.status, 200)
             finally:
                 httpd.shutdown()
                 httpd.server_close()
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_chat_approvals_record_fatigue(self):
+        from super import agents as A
+        from super import capabilities as C
+        from super import memory as M
+        from super import trust as T
+        import super.server as SV  # noqa: F401
+
+        cfg, root = make_cfg()
+        try:
+            agent = A.create_agent(cfg, name="pending-judge", role="reviewer",
+                                   created_by="agent:main")
+            cap = C.propose(
+                cfg,
+                name="fatigue_cap",
+                summary="x",
+                kind="composite",
+                risk="medium",
+                impl={"steps": [{"tool": "list_dir", "args": {"path": "."}, "as": "s"}]},
+                created_by="agent:main",
+            )
+            claim = M.remember(cfg, "needs confirm", source="agent", verification="unverified")
+            httpd = self._serve(cfg)
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            try:
+                code, _ = self._post(base, "/api/agent", {"id": agent["id"], "action": "approve"})
+                self.assertEqual(code, 200)
+                code, _ = self._post(base, "/api/capability", {"id": cap["id"], "action": "approve"})
+                self.assertEqual(code, 200)
+                code, _ = self._post(base, "/api/memory", {"action": "confirm", "id": claim["id"]})
+                self.assertEqual(code, 200)
+                reject_cap = C.propose(
+                    cfg,
+                    name="reject_me",
+                    summary="y",
+                    kind="composite",
+                    risk="medium",
+                    impl={"steps": [{"tool": "list_dir", "args": {"path": "."}, "as": "s"}]},
+                    created_by="agent:main",
+                )
+                code, _ = self._post(base, "/api/capability", {
+                    "id": reject_cap["id"],
+                    "action": "reject",
+                })
+                self.assertEqual(code, 200)
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+            by = T.fatigue(cfg)["by_type"]
+            self.assertEqual(by.get("agent"), {"n": 1, "ok": 1})
+            self.assertEqual(by.get("capability"), {"n": 2, "ok": 1})
+            self.assertEqual(by.get("memory"), {"n": 1, "ok": 1})
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

@@ -3,7 +3,7 @@
  * Dependency Inversion (depends on TokenStore abstraction, not concrete window).
  * Robust error handling via typed errors, never leaks raw stack to UI.
  */
-import type { GateInfo, Session, SessionSummary, TaskNode } from './types';
+import type { GateInfo, Session, SessionSummary } from './types';
 import { AbortError, ApiError, NetworkError, StreamError, ValidationError } from './lib/errors';
 import type { IApiService } from './services/api.types';
 
@@ -58,7 +58,6 @@ export type MemoryClaim = {
   source: string;
   verification: string;
   taint?: string;
-  task_id?: string;
   valid_from?: string;
   valid_until?: string;
   superseded_by?: string;
@@ -182,14 +181,8 @@ class ApiService implements IApiService {
   health() {
     return http.request<{ ok: boolean; model: string }>('/api/health', 'GET');
   }
-  tree() {
-    return http.request<{ tasks: TaskNode[] }>('/api/tree', 'GET');
-  }
   ledger() {
     return http.request<{ gates: Record<string, { pass: number; reject: number }>; open_criticals: unknown[] }>('/api/ledger', 'GET');
-  }
-  report() {
-    return http.request<{ tasks: TaskNode[]; proven: number; total: number; gates: Record<string, { pass: number; reject: number }>; open_criticals: unknown[] }>('/api/report', 'GET');
   }
   sessions() {
     return http.request<{ sessions: SessionSummary[] }>('/api/sessions', 'GET');
@@ -208,23 +201,6 @@ class ApiService implements IApiService {
   cancelChat(sessionId: string) {
     requireId(sessionId);
     return http.request<{ ok: boolean; cancelled: boolean }>('/api/chat/cancel', 'POST', { session_id: sessionId });
-  }
-  prove(id: string, proof: string) {
-    requireId(id);
-    requireNonEmpty(proof, 'proof');
-    return http.request<{ ok: boolean }>('/api/prove', 'POST', { id, proof });
-  }
-  addTask(title: string, done = '') {
-    requireNonEmpty(title, 'title');
-    return http.request<{ ok: boolean; id: string; task?: unknown }>('/api/task', 'POST', { title, done });
-  }
-  approve(id: string, note: string) {
-    requireId(id);
-    return http.request<{ ok: boolean }>('/api/approve', 'POST', { id, note: note || 'approved' });
-  }
-  sendBack(id: string, note: string) {
-    requireId(id);
-    return http.request<{ ok: boolean }>('/api/send-back', 'POST', { id, note: note || 'needs work' });
   }
   async streamChat(
     sessionId: string | null,
@@ -306,14 +282,13 @@ class ApiService implements IApiService {
     const q = qs.toString();
     return http.request<{ claims: MemoryClaim[]; total: number; query?: string }>(`/api/memory${q ? `?${q}` : ''}`, 'GET');
   }
-  addMemory(text: string, opts: { source?: string; verification?: string; task_id?: string } = {}) {
+  addMemory(text: string, opts: { source?: string; verification?: string } = {}) {
     requireNonEmpty(text, 'text');
     return http.request<{ ok: boolean; claim: MemoryClaim }>('/api/memory', 'POST', {
       action: 'add',
       text,
       source: opts.source || 'human',
       verification: opts.verification || 'human',
-      task_id: opts.task_id || '',
     });
   }
   confirmMemory(id: number, verification = 'verified') {
@@ -329,21 +304,14 @@ class ApiService implements IApiService {
   sink() { return http.request<{ entries: number; violations: unknown[]; clean: boolean }>('/api/sink', 'GET'); }
   checklist() { return http.request<{ checklist: string[] }>('/api/checklist', 'GET'); }
   waivers() { return http.request<{ waivers: unknown[] }>('/api/waivers', 'GET'); }
-  diff(opts: { id?: string; paths?: string[] } = {}) {
+  diff(opts: { paths?: string[] } = {}) {
     const qs = new URLSearchParams();
-    if (opts.id) qs.set('id', opts.id);
     for (const p of opts.paths || []) qs.append('path', p);
     const q = qs.toString();
     return http.request<{ ok: boolean; diff: string; paths: string[]; empty: boolean; error?: string | null }>(
       `/api/diff${q ? `?${q}` : ''}`,
       'GET',
     );
-  }
-  spec(id: string) { requireId(id); return http.request<{ task: import('./types').TaskNode; spec: { acceptance: string[]; pinned: boolean } }>(`/api/spec?id=${encodeURIComponent(id)}`, 'GET'); }
-  pinSpec(id: string, acceptance: string[]) {
-    requireId(id);
-    if (!acceptance.length) throw new Error('acceptance criteria required');
-    return http.request<{ ok: boolean; spec: { acceptance: string[]; pinned: boolean } }>('/api/spec/pin', 'POST', { id, acceptance });
   }
   models() {
     return http.request<{
@@ -411,8 +379,6 @@ class ApiService implements IApiService {
     requireNonEmpty(content, 'content');
     return http.request<{ ok: boolean }>('/api/session/edit', 'POST', { id, idx, content });
   }
-  rollback(id: string) { requireId(id); return http.request<{ ok: boolean; reopened: string[] }>('/api/rollback', 'POST', { id }); }
-  leaf() { return http.request<{ leaf: import('./types').TaskNode | null; rendered: string }>('/api/leaf', 'GET'); }
 }
 
 export const api: IApiService = new ApiService();

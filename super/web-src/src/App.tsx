@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ChatView from './components/ChatView';
-import TreeView from './components/TreeView';
-import ApproveView from './components/ApproveView';
-import ReportView from './components/ReportView';
 import SettingsView from './components/SettingsView';
 import { CanvasPopoutView } from './components/chat/CanvasPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -11,7 +8,7 @@ import { Sidebar } from './components/shell/Sidebar';
 import { AppHeader } from './components/shell/AppHeader';
 import { AppFooter } from './components/shell/AppFooter';
 import { useAppData } from './components/shell/hooks/useAppData';
-import { RouterProvider, useRouter, type TreeFilter, type TreeSort, type View } from './lib/router';
+import { RouterProvider, useRouter, type View } from './lib/router';
 import './App.css';
 
 function CanvasShell() {
@@ -33,73 +30,33 @@ function MainShell() {
     model, setModel, models, contextLength, setContextLength,
     think, setThink, thinkLevels, applyThinkMeta,
     workspace, setWorkspace, reloadFlash, setReloadFlash,
-    tasks, gates, criticals, error, setError, offlinePending, loading, stats,
+    gates, criticals, error, setError, offlinePending, loading, stats,
     refresh, fetchModels, fetchWorkspace,
   } = useAppData();
 
   const setView = useCallback((v: View) => {
     if (v === 'chat') navigate({ view: 'chat', sessionId: route.view === 'chat' ? route.sessionId : null });
-    else if (v === 'tree') navigate({
-      view: 'tree',
-      taskId: route.view === 'tree' ? route.taskId : null,
-      q: route.view === 'tree' ? route.q : '',
-      status: route.view === 'tree' ? route.status : 'all',
-      sort: route.view === 'tree' ? route.sort : 'id',
-    });
-    else if (v === 'approve') navigate({ view: 'approve', taskId: route.view === 'approve' ? route.taskId : null });
     else if (v === 'settings') navigate({ view: 'settings' });
     else if (v === 'canvas') navigate({ view: 'canvas' });
-    else navigate({ view: 'report' });
   }, [navigate, route]);
 
   const onSessionIdChange = useCallback((id: string | null) => {
     navigate({ view: 'chat', sessionId: id }, { replace: !id });
   }, [navigate]);
 
-  const onTreeRouteChange = useCallback((patch: {
-    taskId?: string | null; q?: string; status?: TreeFilter; sort?: TreeSort;
-  }) => {
-    if (route.view !== 'tree') return;
-    navigate({
-      view: 'tree',
-      taskId: patch.taskId !== undefined ? patch.taskId : route.taskId,
-      q: patch.q !== undefined ? patch.q : route.q,
-      status: patch.status !== undefined ? patch.status : route.status,
-      sort: patch.sort !== undefined ? patch.sort : route.sort,
-    }, { replace: true });
-  }, [navigate, route]);
-
-  const onApproveTaskIdChange = useCallback((id: string | null) => {
-    navigate({ view: 'approve', taskId: id }, { replace: true });
-  }, [navigate]);
-
-  const goResultsProblems = useCallback(() => {
-    navigate({ view: 'report' });
-    window.setTimeout(() => window.dispatchEvent(new CustomEvent('super-expand-criticals')), 50);
-  }, [navigate]);
-
   const paletteItems = useMemo(() => [
     { id: 'chat', label: 'Go to Chat', hint: '1', action: () => setView('chat') },
-    { id: 'tree', label: 'Go to Tasks', hint: '2', action: () => setView('tree') },
-    { id: 'approve', label: 'Go to Review', hint: '3', action: () => setView('approve') },
-    { id: 'report', label: 'Go to Results', hint: '4', action: () => setView('report') },
-    { id: 'settings', label: 'Go to Settings', hint: '5', action: () => setView('settings') },
+    { id: 'settings', label: 'Go to Settings', hint: '2', action: () => setView('settings') },
     { id: 'newchat', label: 'New chat', hint: 'c', action: () => window.dispatchEvent(new CustomEvent('super-new-chat')) },
     { id: 'refresh', label: 'Refresh data', hint: 'r', action: () => void refresh() },
-    ...(criticals.length ? [{ id: 'problems', label: 'Open problems', hint: `${criticals.length}`, action: goResultsProblems }] : []),
-  ], [refresh, setView, criticals.length, goResultsProblems]);
+  ], [refresh, setView]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.isContentEditable) return;
       if (e.key === '1') setView('chat');
-      if (e.key === '2') setView('tree');
-      if (e.key === '3') setView('approve');
-      if (e.key === '4') setView('report');
-      if (e.key === '5') setView('settings');
-      if (e.key === 'j' && view === 'tree') window.dispatchEvent(new CustomEvent('super-nav', { detail: 'next' }));
-      if (e.key === 'k' && view === 'tree') window.dispatchEvent(new CustomEvent('super-nav', { detail: 'prev' }));
+      if (e.key === '2') setView('settings');
       if (e.key === 'c') window.dispatchEvent(new CustomEvent('super-new-chat'));
       if (e.key === 'r') void refresh();
       if (e.key === 'Escape' && mobileNav) setMobileNav(false);
@@ -122,7 +79,6 @@ function MainShell() {
 
   useEffect(() => { setMobileNav(false); }, [view, route]);
 
-  // Inert background while drawer open
   useEffect(() => {
     const main = document.querySelector('.app-main-wrap');
     if (main) {
@@ -144,7 +100,6 @@ function MainShell() {
       <CommandPalette items={paletteItems} />
       <Sidebar
         view={view}
-        tasks={tasks}
         gates={gates}
         criticals={criticals}
         stats={stats}
@@ -158,12 +113,10 @@ function MainShell() {
         mobileNav={mobileNav}
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => {
-          // On narrow screens the hamburger opens the drawer; otherwise collapse.
           if (window.matchMedia('(max-width: 820px)').matches) setMobileNav((v) => !v);
           else toggleSidebarCollapsed();
         }}
         refresh={refresh}
-        onOpenProblems={goResultsProblems}
       />
 
       <div className="app-main-wrap">
@@ -194,11 +147,6 @@ function MainShell() {
           mobileNav={mobileNav}
           menuBtnRef={menuBtnRef}
           onToggleMobile={() => setMobileNav((v) => !v)}
-          treeQ={route.view === 'tree' ? route.q : ''}
-          onTreeQ={(q) => {
-            if (route.view === 'tree') onTreeRouteChange({ q });
-            else navigate({ view: 'tree', taskId: null, q, status: 'all', sort: 'id' });
-          }}
         />
 
         <main className="app-main" style={{ viewTransitionName: 'content' } as React.CSSProperties}>
@@ -218,27 +166,6 @@ function MainShell() {
                     contextLength={contextLength}
                   />
                 )}
-                {route.view === 'tree' && (
-                  <TreeView
-                    tasks={tasks}
-                    gates={gates}
-                    taskId={route.taskId}
-                    q={route.q}
-                    status={route.status}
-                    sort={route.sort}
-                    onRouteChange={onTreeRouteChange}
-                  />
-                )}
-                {route.view === 'approve' && (
-                  <ApproveView
-                    tasks={tasks}
-                    gates={gates}
-                    onRefresh={() => void refresh()}
-                    taskId={route.taskId}
-                    onTaskIdChange={onApproveTaskIdChange}
-                  />
-                )}
-                {route.view === 'report' && <ReportView tasks={tasks} gates={gates} criticals={criticals} />}
                 {route.view === 'settings' && (
                   <SettingsView
                     model={model}
@@ -267,7 +194,6 @@ function MainShell() {
           stats={stats}
           offlinePending={offlinePending}
           criticals={criticals}
-          onOpenProblems={goResultsProblems}
           onDrainOffline={() => window.dispatchEvent(new Event('online'))}
         />
       </div>

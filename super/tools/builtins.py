@@ -319,51 +319,7 @@ def fetch_url(cfg: dict, args: dict) -> ToolResult:
     return ToolResult(True, text, {"content_type": ctype}, taint="untrusted")
 
 
-# ── tasks / memory / project ─────────────────────────────────────────
-
-def list_tasks(cfg: dict, args: dict) -> ToolResult:
-    from .. import tasks as T
-    try:
-        items = T.list_all(cfg)
-    except Exception as e:
-        return ToolResult(False, str(e))
-    status = args.get("status")
-    if status:
-        items = [t for t in items if isinstance(t, dict) and t.get("status") == status]
-    return ToolResult(True, dump_json(items[:100]), {"count": len(items)})
-
-
-def get_task(cfg: dict, args: dict) -> ToolResult:
-    from .. import tasks as T
-    tid = str(args.get("id") or "")
-    if not tid:
-        return ToolResult(False, "id required")
-    try:
-        t = T.get(cfg, tid)
-    except Exception as e:
-        return ToolResult(False, str(e))
-    if not t:
-        return ToolResult(False, f"no task {tid}")
-    return ToolResult(True, dump_json(t), {"id": tid})
-
-
-def add_task(cfg: dict, args: dict) -> ToolResult:
-    from .. import tasks as T
-    title = str(args.get("title") or "").strip()
-    if not title:
-        return ToolResult(False, "title required")
-    try:
-        nid = T.add(
-            cfg,
-            title,
-            done=str(args.get("done_looks_like") or args.get("done") or ""),
-            parent=args.get("parent"),
-        )
-        node = T.get(cfg, nid)
-    except Exception as e:
-        return ToolResult(False, str(e))
-    return ToolResult(True, dump_json(node), {"id": nid})
-
+# ── memory / project ─────────────────────────────────────────────────
 
 def memory_search(cfg: dict, args: dict) -> ToolResult:
     from .. import memory
@@ -371,7 +327,7 @@ def memory_search(cfg: dict, args: dict) -> ToolResult:
     try:
         hits = memory.search(cfg, q, limit=20)
         if not hits:
-            text = memory.compile_context(cfg, {"id": "?", "title": q or "search"}, limit=12)
+            text = memory.compile_context(cfg, limit=12)
             return ToolResult(True, text or "(no memory hits)")
     except Exception as e:
         return ToolResult(False, str(e))
@@ -388,7 +344,6 @@ def memory_add(cfg: dict, args: dict) -> ToolResult:
         stored = memory.remember(
             cfg, claim,
             source=str(args.get("source") or "agent"),
-            task_id=str(args.get("task_id") or ""),
             verification=ver if ver in ("unverified", "verified", "human") else "unverified",
         )
     except Exception as e:

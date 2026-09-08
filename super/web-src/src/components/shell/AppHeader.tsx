@@ -28,24 +28,21 @@ type Props = {
   onToggleMobile: () => void;
   mobileNav: boolean;
   menuBtnRef?: RefObject<HTMLButtonElement | null>;
-  treeQ: string;
-  onTreeQ: (q: string) => void;
 };
 
 export function AppHeader({
   view, stats, model, models, think, thinkLevels, reloadFlash, setReloadFlash,
   onModelChange, onThinkChange, setError,
-  refresh, fetchModels, fetchWorkspace, onToggleMobile, mobileNav, menuBtnRef, treeQ, onTreeQ,
+  refresh, fetchModels, fetchWorkspace, onToggleMobile, mobileNav, menuBtnRef,
 }: Props) {
   const NavIcon = Icons[VIEW_META[view].icon];
   const modelLabel = model ? modelShort(model) : 'offline';
   const isOffline = !model;
   const sub =
     view === 'chat' ? 'generalist · tools · specialists' :
-    view === 'tree' ? `${stats.total} tasks` :
-    view === 'approve' ? `${stats.pending} to review` :
     view === 'settings' ? 'model · look · tools' :
-    `${stats.proven}/${stats.total} done`;
+    view === 'canvas' ? 'artifacts' :
+    `${stats.gatePass} pass · ${stats.gateReject} reject`;
 
   return (
     <header className="app-header">
@@ -69,23 +66,13 @@ export function AppHeader({
           <p>
             {VIEW_META[view].desc}{' '}
             <span className="mono muted" style={{ fontSize: 'var(--text-2xs)' }}>
-              · 1–5 switch · {view === 'tree' ? 'j/k · / search · ' : ''}⌘K · r refresh · c new chat
+              · 1–2 switch · ⌘K · r refresh · c new chat
             </span>
           </p>
         )}
       </div>
 
       <div className="header-actions">
-        <div className="search-wrap" style={{ display: view === 'tree' ? 'flex' : 'none' }} aria-hidden={view !== 'tree'}>
-          <Icons.search size={14} />
-          <input
-            id="header-task-search"
-            value={treeQ}
-            onChange={(e) => onTreeQ(e.target.value)}
-            placeholder="Search tasks… (/)"
-            aria-label="Search tasks"
-          />
-        </div>
         <div className="header-divider" aria-hidden />
         <div className="header-model-cluster">
           <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: isOffline ? 'var(--yellow)' : 'var(--green)', flexShrink: 0 }} aria-hidden />

@@ -131,19 +131,8 @@ def evolve(cfg: dict, proposals: dict[str, dict] | None = None) -> dict:
 
 
 def distillation_candidates(cfg: dict, min_verified: int = 3) -> list[dict]:
-    """Verified traces for SLM fine-tuning: task + proof + gate passes."""
-    # Pull from ledger: sessions where gate pass and task proven
-    try:
-        from . import tasks as _tasks
-        all_tasks = _tasks.list_all(cfg)
-        proven = [t for t in all_tasks if t.get("status") == "proven" and t.get("proof")]
-        # require at least min_verified traces
-        if len(proven) < min_verified:
-            return []
-        # return compact traces
-        return [{"task": t["title"], "proof": t["proof"], "id": t["id"]} for t in proven[:50]]
-    except Exception:
-        return []
+    """Verified traces for SLM fine-tuning (reserved; currently empty)."""
+    return []
 
 
 def evaluate_gate_proposal(cfg: dict, gate: str) -> dict:

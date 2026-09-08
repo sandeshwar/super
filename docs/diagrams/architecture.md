@@ -7,23 +7,23 @@ flowchart TB
         AMB -- no --> CLAR[Clarify]
         CLAR --> REQ
         AMB -- yes --> AC[Ambition Contract<br/>quality ladder]
-        AC --> SP[Spec Pinner<br/>failing tests = spec]
+        AC --> SP[Acceptance checks<br/>failing tests / observables]
     end
 
-    subgraph PLAN["Plan: task graph on disk"]
-        SP --> TG[Task graph<br/>parent/child, depends-on, proof]
-        TG --> LEAF[One leaf to model<br/>what/why/done/needs]
+    subgraph PLAN["Plan"]
+        SP --> AG[Intelligence agenda<br/>+ chat tools]
+        AG --> TURN[Current turn<br/>goal + constraints]
     end
 
     subgraph CTX["Context per step"]
-        LEAF --> CC[Compiler<br/>working set only]
+        TURN --> CC[Compiler<br/>working set only]
         CS[Claim store<br/>source x verif x validity x taint] --- CC
         SG[Symbol graph] --- CC
         DOC[Version-pinned docs<br/>tainted] --- CC
     end
 
     subgraph EXEC["Execute"]
-        CC --> W[Worker: one microtask<br/>Best-of-N samples]
+        CC --> W[Worker step<br/>Best-of-N samples]
         SB[Disposable sandbox] --- W
         W --> GATES[Ground, docs,<br/>dup, budgets]
     end
@@ -36,7 +36,7 @@ flowchart TB
 
     subgraph HUMAN["Human + Trust"]
         CG --> RISK{Blast radius + trust?}
-        RISK -- low + proven --> AUTO[Auto-pass, logged]
+        RISK -- low + track record --> AUTO[Auto-pass, logged]
         RISK -- high or new --> HG[Human: critic evidence]
         AUTO --> SHIP[Ship + scorecard]
         HG --> SHIP
@@ -62,6 +62,6 @@ flowchart TB
     GA -. catch-rate .-> EVO
 ```
 
-- Harness holds the forest (graph); model holds one leaf (F10 fix).
-- Gates dispose; model proposes. Every gate logs to earn its keep or be deleted.
+- Agenda + tools steer long work; gates dispose writes. Every gate logs to earn its keep or be deleted.
 - Security + ledger touch every layer; meta loop evolves everything except the grader.
+- Product UI: Chat + Settings; human approvals for agents / capabilities / memory appear in chat.

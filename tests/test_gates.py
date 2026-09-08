@@ -1,4 +1,4 @@
-"""Gate and enforcement tests: grounding, contract, verify, quality, spec, security."""
+"""Gate and enforcement tests: grounding, contract, verify, quality, security."""
 import os
 import shutil
 import sys
@@ -114,39 +114,6 @@ class TestQuality(unittest.TestCase):
             ok, violations = Q.check_budgets(cfg, big, path="big.py")
             self.assertFalse(ok)
             self.assertTrue(violations)
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-
-class TestSpec(unittest.TestCase):
-    def test_pin_requires_checks(self):
-        from super import spec as S
-        from super.errors import SpecError
-
-        cfg, root = make_cfg()
-        try:
-            with self.assertRaises(SpecError):
-                S.pin_spec(cfg, {"id": "1"}, [])
-            s = S.pin_spec(cfg, {"id": "1"}, ["tests/login.py::test_fail fails"])
-            ok, _ = S.probe(cfg, s, "unrelated weather report about clouds")
-            self.assertFalse(ok)
-            ok, _ = S.probe(cfg, s, "tests/login.py test_fail password check fixed")
-            self.assertTrue(ok)
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-    def test_pin_persists_and_reads_back(self):
-        from super import spec as S
-
-        cfg, root = make_cfg()
-        try:
-            self.assertIsNone(S.get_spec(cfg, "7"))
-            s = S.pin_spec(cfg, {"id": "7"}, ["tests/a.py::test_x fails"])
-            self.assertTrue(s["pinned"])
-            back = S.get_spec(cfg, "7")
-            self.assertEqual(back["acceptance"], ["tests/a.py::test_x fails"])
-            self.assertTrue(back["pinned"])
-            self.assertEqual(len(S.list_specs(cfg)), 1)
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

@@ -1,9 +1,9 @@
 """Autonomous intelligence loop: audit → agenda → auto-act → briefing.
 
 This is the metacognition layer. Every turn SUPER:
-  1. Scans tasks, gates, memory, tools, capabilities, agents, replay corpus
+  1. Scans gates, memory, tools, capabilities, agents, replay corpus
   2. Writes prioritized gap findings to an agenda
-  3. Auto-executes safe improvements (tasks, low-risk composites, memory)
+  3. Auto-executes safe improvements (low-risk composites, memory)
   4. Injects a briefing into the system prompt so the model pursues gaps
      without being asked
 
@@ -26,7 +26,6 @@ PRIORITIES = ("critical", "high", "medium", "low")
 KINDS = (
     "missing_capability",
     "improve_workflow",
-    "task_gap",
     "quality",
     "memory",
     "specialist",
@@ -34,6 +33,9 @@ KINDS = (
     "safety",
 )
 STATUSES = ("open", "acting", "done", "dismissed")
+# Retired action types from the removed work-plan seeder — dismiss on load.
+_DEAD_ACTIONS = frozenset({"seed_tasks", "seed_next_wave"})
+_DEAD_KINDS = frozenset({"task_gap"})
 
 # Fingerprints of composites we auto-propose when the raw tools exist but no cap does.
 WORKFLOW_RECIPES: list[dict[str, Any]] = [
@@ -140,6 +142,21 @@ def _load(cfg: dict) -> dict:
     if not isinstance(data, dict) or not isinstance(data.get("agenda"), dict):
         raise StoreError("intelligence store is malformed")
     data.setdefault("stats", {"audits": 0, "auto_acts": 0, "findings_total": 0})
+    dirty = False
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    for item in list((data.get("agenda") or {}).values()):
+        if not isinstance(item, dict):
+            continue
+        atype = str((item.get("action") or {}).get("type") or "")
+        kind = str(item.get("kind") or "")
+        if atype in _DEAD_ACTIONS or kind in _DEAD_KINDS:
+            if item.get("status") in ("open", "acting"):
+                item["status"] = "dismissed"
+                item["updated_at"] = now
+                item["result"] = {"note": "retired action/kind removed from product"}
+                dirty = True
+    if dirty:
+        _save(cfg, data)
     return data
 
 
@@ -168,72 +185,6 @@ def _public_item(item: dict) -> dict:
 
 
 # ── audit sensors ─────────────────────────────────────────────────────
-
-def _scan_tasks(cfg: dict) -> list[dict]:
-    out = []
-    try:
-        from . import tasks
-        nodes = tasks.list_all(cfg)
-    except Exception:
-        return [{
-            "kind": "task_gap", "priority": "high",
-            "title": "Task graph unreadable",
-            "detail": "Fix tasks store so planning can resume.",
-            "action": {"type": "note"},
-            "key": "tasks_unreadable",
-        }]
-    if not nodes:
-        out.append({
-            "kind": "task_gap", "priority": "high",
-            "title": "No tasks — invent a work plan",
-            "detail": "Empty graph. Propose 2–5 concrete improvement/research tasks from the repo and user goals.",
-            "action": {"type": "seed_tasks"},
-            "key": "no_tasks",
-        })
-        return out
-    blocked = [n for n in nodes if n.get("status") == "blocked"]
-    waiting = [n for n in nodes if n.get("status") == "waiting"]
-    doing = [n for n in nodes if n.get("status") == "doing"]
-    if blocked:
-        out.append({
-            "kind": "task_gap", "priority": "critical",
-            "title": f"{len(blocked)} blocked task(s) need unblock strategy",
-            "detail": "; ".join(f"#{n['id']} {n.get('title','')}" for n in blocked[:5]),
-            "action": {"type": "address_blocked", "ids": [n["id"] for n in blocked[:8]]},
-            "key": "blocked_tasks",
-        })
-    if not doing and not waiting and any(n.get("status") == "proven" for n in nodes):
-        out.append({
-            "kind": "improve_workflow", "priority": "medium",
-            "title": "All tasks proven — propose next ambitions",
-            "detail": "Graph idle. Identify missing features, refactors, tests, or research follow-ups.",
-            "action": {"type": "seed_next_wave"},
-            "key": "idle_proven",
-        })
-    leaf = None
-    try:
-        leaf = tasks.leaf(cfg)
-    except Exception:
-        pass
-    if not leaf and waiting:
-        out.append({
-            "kind": "task_gap", "priority": "high",
-            "title": "Waiting tasks but no actionable leaf",
-            "detail": "Dependency deadlock or mis-wired needs — inspect and repair.",
-            "action": {"type": "fix_deps"},
-            "key": "no_leaf",
-        })
-    bare = [n for n in waiting + doing if not (n.get("done") or "").strip()]
-    if bare:
-        out.append({
-            "kind": "quality", "priority": "medium",
-            "title": f"{len(bare)} task(s) lack done-looks-like",
-            "detail": "Tighten acceptance criteria so prove/gates mean something.",
-            "action": {"type": "note", "ids": [n["id"] for n in bare[:8]]},
-            "key": "bare_done",
-        })
-    return out
-
 
 def _scan_gates(cfg: dict) -> list[dict]:
     out = []
@@ -421,7 +372,7 @@ def audit(cfg: dict) -> list[dict]:
     """Run all sensors; return raw findings (not yet merged into agenda)."""
     findings: list[dict] = []
     for scanner in (
-        _scan_tasks, _scan_gates, _scan_memory,
+        _scan_gates, _scan_memory,
         _scan_capabilities, _scan_agents, _scan_config,
     ):
         try:
@@ -547,31 +498,6 @@ def _act_forge_recipe(cfg: dict, item: dict) -> dict:
     return {"ok": True, "capability": cap}
 
 
-def _act_seed_tasks(cfg: dict, item: dict) -> dict:
-    from . import tasks
-    seeds = [
-        ("Map workspace structure and entrypoints", "repo_tree + list_dir done; memory claims for stack"),
-        ("Identify top 3 quality/safety gaps", "written as tasks with done-looks-like"),
-        ("Forge one low-risk composite capability for a repeated workflow", "capability installed or pending"),
-    ]
-    if (item.get("action") or {}).get("type") == "seed_next_wave":
-        seeds = [
-            ("Propose next ambition wave from proven work", "2+ new tasks with clear done criteria"),
-            ("Retire or confirm stale memory claims", "unverified pile reduced"),
-        ]
-    created = []
-    existing_titles = {str(n.get("title") or "").lower() for n in tasks.list_all(cfg)}
-    for title, done in seeds:
-        if title.lower() in existing_titles:
-            continue
-        try:
-            nid = tasks.add(cfg, title, done=done, why="intelligence auto-plan")
-            created.append(nid)
-        except Exception:
-            continue
-    return {"ok": True, "created": created}
-
-
 def _act_seed_memory(cfg: dict, item: dict) -> dict:
     from . import memory
     import os
@@ -615,8 +541,6 @@ _ACTORS = {
         **item,
         "action": {"type": "forge_recipe", "recipe_id": "recipe_repo_pulse"},
     }),
-    "seed_tasks": _act_seed_tasks,
-    "seed_next_wave": _act_seed_tasks,
     "seed_memory": _act_seed_memory,
     "meta_evolve": _act_meta_evolve,
     "suggest_reviewer": _act_suggest_reviewer,
@@ -636,8 +560,8 @@ def auto_act(cfg: dict, *, limit: int = 3) -> dict:
         if len(acted) >= limit:
             break
         atype = (item.get("action") or {}).get("type") or "note"
-        if atype in ("note", "address_blocked", "fix_deps", "resolve_criticals", "curate_memory"):
-            # model must handle — leave open for briefing
+        if atype in ("note", "address_blocked", "fix_deps", "resolve_criticals", "curate_memory") or atype in _DEAD_ACTIONS:
+            # model must handle — or retired seeder actions
             continue
         fn = _ACTORS.get(atype)
         if not fn:
@@ -708,6 +632,12 @@ def pursue(cfg: dict, item_id: str) -> dict:
     if not item:
         raise KeyError(item_id)
     atype = (item.get("action") or {}).get("type") or "note"
+    if atype in _DEAD_ACTIONS or str(item.get("kind") or "") in _DEAD_KINDS:
+        item["status"] = "dismissed"
+        item["updated_at"] = _now()
+        item["result"] = {"note": "retired action/kind removed from product"}
+        _save(cfg, data)
+        return {"ok": True, "dismissed": True, "item": _public_item(item)}
     fn = _ACTORS.get(atype)
     if not fn:
         return {
@@ -746,7 +676,7 @@ def compile_briefing(cfg: dict, *, max_items: int = 6) -> str:
     if not items:
         return (
             "\n\nIntelligence: Agenda clear. Still: notice friction, missing tools, "
-            "and weak acceptance criteria; propose_capability / add_task / create_agent "
+            "and weak acceptance criteria; propose_capability / create_agent "
             "proactively when you see a repeated gap — do not wait to be asked."
         )
     lines = [
@@ -762,7 +692,7 @@ def compile_briefing(cfg: dict, *, max_items: int = 6) -> str:
         "Standing orders: (1) If the user request is simple chat, answer briefly then "
         "optionally act on one high/critical agenda item. (2) If the user asks for work, "
         "fold the highest-priority related agenda item into the plan. "
-        "(3) Use pursue_agenda / propose_capability / add_task / create_agent / memory_add. "
+        "(3) Use pursue_agenda / propose_capability / create_agent / memory_add. "
         "(4) After fixing an item, dismiss_agenda with a short reason. "
         f"Last audit: {data.get('last_audit_iso') or 'never'}."
     )

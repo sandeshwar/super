@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../api';
-import type { TaskNode } from '../../../types';
 import { useOfflineQueue } from '../../../hooks/useOfflineQueue';
 import { userMessage } from '../../../lib/errors';
 import { normalizeThinkLevel, type ThinkLevel } from '../../../lib/think';
 
-export type Stats = { proven: number; total: number; pct: number; gatePass: number; gateReject: number; pending: number; waiting: number; doing: number };
+export type Stats = { gatePass: number; gateReject: number };
 
 export function useAppData() {
   const [model, setModel] = useState('');
@@ -15,7 +14,6 @@ export function useAppData() {
   const [thinkLevels, setThinkLevels] = useState<ThinkLevel[]>(['off']);
   const [workspace, setWorkspace] = useState('');
   const [reloadFlash, setReloadFlash] = useState(false);
-  const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [gates, setGates] = useState<Record<string, { pass: number; reject: number }>>({});
   const [criticals, setCriticals] = useState<unknown[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +39,8 @@ export function useAppData() {
 
   const refresh = useCallback(async () => {
     try {
-      const [h, t, l] = await Promise.all([api.health(), api.tree(), api.ledger()]);
+      const [h, l] = await Promise.all([api.health(), api.ledger()]);
       setModel(h.model ?? '');
-      setTasks(t.tasks);
       setGates(l.gates);
       setCriticals(l.open_criticals);
       setError(null);
@@ -104,22 +101,16 @@ export function useAppData() {
   }, [refresh]);
 
   const stats: Stats = useMemo(() => {
-    const proven = tasks.filter((t) => t.status === 'proven').length;
-    const total = tasks.length;
-    const pct = total ? Math.round((proven / total) * 100) : 0;
     const gatePass = Object.values(gates).reduce((s, g) => s + g.pass, 0);
     const gateReject = Object.values(gates).reduce((s, g) => s + g.reject, 0);
-    const waiting = tasks.filter((t) => t.status === 'waiting').length;
-    const doing = tasks.filter((t) => t.status === 'doing').length;
-    const pending = waiting + doing;
-    return { proven, total, pct, gatePass, gateReject, pending, waiting, doing };
-  }, [tasks, gates]);
+    return { gatePass, gateReject };
+  }, [gates]);
 
   return {
     model, setModel, models, contextLength, setContextLength,
     think, setThink, thinkLevels, setThinkLevels, applyThinkMeta,
     workspace, setWorkspace, reloadFlash, setReloadFlash,
-    tasks, gates, criticals, error, setError, offlinePending, loading,
+    gates, criticals, error, setError, offlinePending, loading,
     stats, refresh, fetchModels, fetchWorkspace, enqueue,
   };
 }

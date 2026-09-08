@@ -1,6 +1,6 @@
 """Atomic JSON store with advisory file locking.
 
-Every persistent collection (tasks, sessions, claims, ledger indexes) goes
+Every persistent collection (sessions, claims, ledger indexes) goes
 through this module so concurrent CLI + server writers cannot interleave
 partial JSON. Writes are tmp-file + fsync + os.replace. Reads take a shared
 lock. Corrupt files are quarantined to *.corrupt-<ts> and surfaced as

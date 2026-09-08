@@ -21,7 +21,7 @@ flowchart LR
 
     subgraph DISPATCH["Tool Middleware"]
         REQ[Tool call requested]
-        BOUND{"call authority <=<br/>min task authority,<br/>1 - taint of producing context ?"}
+        BOUND{"call authority <=<br/>min inherited authority,<br/>1 - taint of producing context ?"}
         OK[Execute with<br/>scoped capability token]
         DENY[Denied: tainted context<br/>may not cause this call]
     end

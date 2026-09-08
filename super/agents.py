@@ -524,7 +524,7 @@ def root_effective(cfg: dict) -> dict:
         "groups": groups,
         "disabled": sorted(disabled_names(cfg)),
         "tools": None,  # all tools in enabled groups
-        "max_steps": int((cfg.get("envelope") or {}).get("max_steps_per_task", 20)),
+        "max_steps": int((cfg.get("envelope") or {}).get("max_tool_steps", 20)),
         "max_result_chars": int((cfg.get("tools") or {}).get("max_result_chars", 8000)),
         "may_write": True,
         "may_spawn": True,
@@ -669,7 +669,7 @@ def apply_effective(cfg: dict, eff: dict) -> dict:
     }
     # Tighten envelope / tools without loosening global defaults for siblings
     env = dict(cfg.get("envelope") or {})
-    env["max_steps_per_task"] = int(eff["max_steps"])
+    env["max_tool_steps"] = int(eff["max_steps"])
     cfg["envelope"] = env
     tools = dict(cfg.get("tools") or {})
     tools["max_result_chars"] = int(eff["max_result_chars"])

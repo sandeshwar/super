@@ -5,9 +5,6 @@ import { Badge } from '../ui/Badge';
 import { useToolPrefs } from '../../lib/toolPrefs';
 
 const SLASH_COMMANDS = [
-  { cmd: '/add-task', desc: 'Add a task' },
-  { cmd: '/spec-pin', desc: 'Pin acceptance checks for a task' },
-  { cmd: '/prove', desc: 'Attach proof to a task' },
   { cmd: '/clear', desc: 'Clear this chat' },
   { cmd: '/export', desc: 'Export this chat' },
 ];

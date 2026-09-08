@@ -3,7 +3,6 @@ import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { useChat } from './chat/hooks/useChat';
 import { SessionsPanel } from './chat/SessionsPanel';
-import { LeafBanner } from './chat/LeafBanner';
 import { ChatHeader } from './chat/ChatHeader';
 import { ContextBar } from './chat/ContextBar';
 import { MessageList } from './chat/MessageList';
@@ -29,7 +28,7 @@ export default function ChatView({
 }) {
   const {
     sessions, filtered, activeId, messages, input, busy, error, setError, filter, setFilter,
-    isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
+    isRenaming, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
     llmStats, sessionLoading,
@@ -122,7 +121,6 @@ export default function ChatView({
       />
 
       <Card className={`chat-panel${toolsOpen ? ' tools-open' : ''}`}>
-        <LeafBanner leaf={leaf} leafRendered={leafRendered} />
         <ChatHeader
           activeId={activeId}
           activeMeta={activeMeta}
@@ -142,7 +140,6 @@ export default function ChatView({
         <ContextBar
           open={contextOpen}
           tokenStats={tokenStats}
-          leaf={leaf}
           messagesLen={messages.length}
           cost={cost}
           llmStats={llmStats}

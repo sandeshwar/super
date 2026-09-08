@@ -2,20 +2,13 @@
  * API contract — SOLID: Interface Segregation & Dependency Inversion.
  * Components depend on IApiService, not concrete fetch.
  */
-import type { GateInfo, Session, SessionSummary, TaskNode } from '../types';
+import type { GateInfo, Session, SessionSummary } from '../types';
 
 export interface IHealthService {
   health(): Promise<{ ok: boolean; model: string; version?: string; llm_reachable?: boolean; llm_detail?: string }>;
 }
-export interface ITaskService {
-  tree(): Promise<{ tasks: TaskNode[]; tree?: unknown }>;
+export interface ILedgerService {
   ledger(): Promise<{ gates: Record<string, { pass: number; reject: number }>; open_criticals: unknown[] }>;
-  report(): Promise<{ tasks: TaskNode[]; proven: number; total: number; gates: Record<string, { pass: number; reject: number }>; open_criticals: unknown[] }>;
-  approve(id: string, note: string): Promise<{ ok: boolean }>;
-  sendBack(id: string, note: string): Promise<{ ok: boolean }>;
-  rollback(id: string): Promise<{ ok: boolean; reopened: string[] }>;
-  prove(id: string, proof: string): Promise<{ ok: boolean }>;
-  addTask(title: string, done?: string): Promise<{ ok: boolean; id: string; task?: unknown }>;
 }
 export interface ISessionService {
   sessions(): Promise<{ sessions: SessionSummary[] }>;
@@ -78,7 +71,6 @@ export type MemoryClaim = {
   source: string;
   verification: string;
   taint?: string;
-  task_id?: string;
   valid_from?: string;
   valid_until?: string;
   superseded_by?: string;
@@ -94,7 +86,7 @@ export interface IAgentsService {
 }
 export interface IMemoryService {
   listMemory(opts?: { q?: string; includeDead?: boolean; limit?: number; offset?: number }): Promise<{ claims: MemoryClaim[]; total: number; query?: string }>;
-  addMemory(text: string, opts?: { source?: string; verification?: string; task_id?: string }): Promise<{ ok: boolean; claim: MemoryClaim }>;
+  addMemory(text: string, opts?: { source?: string; verification?: string }): Promise<{ ok: boolean; claim: MemoryClaim }>;
   confirmMemory(id: number, verification?: string): Promise<{ ok: boolean; claim: MemoryClaim }>;
   supersedeMemory(id: number, replacement: string): Promise<{ ok: boolean; claim: MemoryClaim }>;
   retireMemory(id: number): Promise<{ ok: boolean; claim: MemoryClaim }>;
@@ -128,9 +120,7 @@ export interface ISecurityService {
   sink(): Promise<{ entries: number; violations: unknown[]; clean: boolean }>;
   checklist(): Promise<{ checklist: string[] }>;
   waivers(): Promise<{ waivers: unknown[] }>;
-  spec(id: string): Promise<{ task: import('./../types').TaskNode; spec: { acceptance: string[]; pinned: boolean } }>;
-  pinSpec(id: string, acceptance: string[]): Promise<{ ok: boolean; spec: { acceptance: string[]; pinned: boolean } }>;
-  diff(opts?: { id?: string; paths?: string[] }): Promise<{ ok: boolean; diff: string; paths: string[]; empty: boolean; error?: string | null }>;
+  diff(opts?: { paths?: string[] }): Promise<{ ok: boolean; diff: string; paths: string[]; empty: boolean; error?: string | null }>;
 }
 export interface IModelService {
   models(): Promise<{
@@ -180,6 +170,5 @@ export interface IRenameService {
 export interface IChatEditService {
   branchSession(id: string, upTo: number, title?: string): Promise<{ ok: boolean; id: string }>;
   editMessage(id: string, idx: number, content: string): Promise<{ ok: boolean }>;
-  leaf(): Promise<{ leaf: import('../types').TaskNode | null; rendered: string }>;
 }
-export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService & IMemoryService & ICapabilitiesService & IIntelligenceService;
+export type IApiService = IHealthService & ILedgerService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService & IMemoryService & ICapabilitiesService & IIntelligenceService;

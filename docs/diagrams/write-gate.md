@@ -1,8 +1,8 @@
-# Write-Gate Flow — one leaf at a time
+# Write-Gate Flow — one step at a time
 
 ```mermaid
 flowchart TD
-    LEAF[Leaf card: what/why/done/needs] --> S[Best-of-N samples<br/>cheap tries]
+    TURN[Current turn goal + constraints] --> S[Best-of-N samples<br/>cheap tries]
     S --> G1{Symbol observed?<br/>grep/LSP/type evidence}
     G1 -- no --> R1[REJECT: observe first]
     R1 --> S
@@ -17,17 +17,17 @@ flowchart TD
     V1 -- fail --> IL1[Ledger entry, fix now]
     IL1 --> S
     V1 -- pass --> PICK[Pick best sample]
-    PICK --> DP{Drift probe:<br/>diff vs spec?}
+    PICK --> DP{Drift probe:<br/>diff vs acceptance?}
     DP -- mismatch --> IL2[Ledger entry<br/>even if green]
-    DP -- aligned --> L2[Subset per subtask]
+    DP -- aligned --> L2[Focused test subset]
     L2 --> L3[Full suite per commit<br/>N-run flaky quarantine]
     L3 --> SPEC{Acceptance green?}
     SPEC -- no --> S
     SPEC -- yes --> MUT{Vacuous?<br/>green under mutation}
     MUT -- yes --> REJ[Rejected as check]
-    MUT -- no --> PROOF[Proof linked<br/>leaf closable]
+    MUT -- no --> DONE[Checks satisfied<br/>ship or continue]
 ```
 
 - Rejection names the missing tool call; the gate teaches.
-- Done needs: spec green + non-vacuous tests + no open criticals + proof link.
+- Done needs: acceptance green + non-vacuous tests + no open criticals.
 - No budget/progress → early abort: re-plan or escalate, don't burn steps.

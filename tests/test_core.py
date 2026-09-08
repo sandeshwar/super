@@ -1,4 +1,4 @@
-"""Core state tests: config, store, tasks, ledger, sessions."""
+"""Core state tests: config, store, ledger, sessions."""
 import os
 import shutil
 import unittest
@@ -67,6 +67,57 @@ class TestConfig(unittest.TestCase):
             os.environ.pop("SUPER_PORT", None)
             shutil.rmtree(d, ignore_errors=True)
 
+    def test_legacy_keys_fill_when_new_absent(self):
+        import json
+        import tempfile
+        from super import config as C
+
+        d = tempfile.mkdtemp(prefix="super-cfg-")
+        try:
+            p = os.path.join(d, "super.config.json")
+            with open(p, "w") as f:
+                json.dump({
+                    "envelope": {"max_steps_per_task": 77, "max_microtask_lines": 33},
+                    "trust": {"attention_budget_per_task": 12},
+                }, f)
+            loaded = C.load(p)
+            self.assertEqual(loaded["envelope"]["max_tool_steps"], 77)
+            self.assertEqual(loaded["envelope"]["max_reply_lines"], 33)
+            self.assertEqual(loaded["trust"]["attention_budget"], 12)
+            self.assertNotIn("max_steps_per_task", loaded["envelope"])
+            self.assertNotIn("max_microtask_lines", loaded["envelope"])
+            self.assertNotIn("attention_budget_per_task", loaded["trust"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_new_keys_win_over_legacy_in_same_file(self):
+        import json
+        import tempfile
+        from super import config as C
+
+        d = tempfile.mkdtemp(prefix="super-cfg-")
+        try:
+            p = os.path.join(d, "super.config.json")
+            with open(p, "w") as f:
+                json.dump({
+                    "envelope": {
+                        "max_steps_per_task": 200,
+                        "max_tool_steps": 42,
+                        "max_microtask_lines": 99,
+                        "max_reply_lines": 15,
+                    },
+                    "trust": {
+                        "attention_budget_per_task": 99,
+                        "attention_budget": 7,
+                    },
+                }, f)
+            loaded = C.load(p)
+            self.assertEqual(loaded["envelope"]["max_tool_steps"], 42)
+            self.assertEqual(loaded["envelope"]["max_reply_lines"], 15)
+            self.assertEqual(loaded["trust"]["attention_budget"], 7)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 class TestStore(unittest.TestCase):
     def test_atomic_roundtrip(self):
@@ -99,57 +150,6 @@ class TestStore(unittest.TestCase):
                 store.load_json(p, {})
         finally:
             shutil.rmtree(d, ignore_errors=True)
-
-
-class TestTasks(unittest.TestCase):
-    def test_lifecycle(self):
-        from super import tasks
-
-        cfg, root = make_cfg()
-        try:
-            a = tasks.add(cfg, "A", done="t green")
-            b = tasks.add(cfg, "B", needs=[a])
-            self.assertIsNotNone(tasks.leaf(cfg))
-            self.assertEqual(tasks.leaf(cfg)["id"], a)
-            tasks.prove(cfg, a, "tests/a.py green")
-            self.assertEqual(tasks.leaf(cfg)["id"], b)
-            tasks.prove(cfg, b, "tests/b.py green")
-            self.assertIsNone(tasks.leaf(cfg))
-            self.assertEqual(tasks.stats(cfg)["proven"], 2)
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-    def test_validation(self):
-        from super import tasks
-        from super.errors import TaskValidation
-
-        cfg, root = make_cfg()
-        try:
-            with self.assertRaises(TaskValidation):
-                tasks.add(cfg, "  ")
-            a = tasks.add(cfg, "A")
-            with self.assertRaises(TaskValidation):
-                tasks.add(cfg, "B", needs=["999"])
-            with self.assertRaises(TaskValidation):
-                tasks.prove(cfg, a, "  ")
-            with self.assertRaises(TaskValidation):
-                tasks.set_status(cfg, a, "nope")
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-    def test_rollback(self):
-        from super import tasks
-
-        cfg, root = make_cfg()
-        try:
-            a = tasks.add(cfg, "A")
-            b = tasks.add(cfg, "B")
-            tasks.prove(cfg, a, "p1")
-            tasks.prove(cfg, b, "p2")
-            reopened = tasks.rollback(cfg, a)
-            self.assertEqual(set(reopened), {a, b})
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
 
 
 class TestLedger(unittest.TestCase):

@@ -2,7 +2,7 @@
 
 Ladder (each rung gates the next):
   per-edit     — syntax parse + lint presence, milliseconds
-  per-subtask  — focused test subset via test-impact analysis
+  per-change   — focused test subset via test-impact analysis
   per-commit   — full suite + N-run flaky quarantine
   acceptance   — mutation screen: a new test that stays green under mutation
                  is vacuous and cannot gate anything

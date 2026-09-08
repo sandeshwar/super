@@ -59,15 +59,10 @@ def _chat_run_cancel(sid: str) -> bool:
 
 
 def _report(cfg: dict) -> dict:
-    from . import ledger, quality, tasks, trust
+    from . import ledger, quality, trust
 
-    all_tasks = tasks.list_all(cfg)
-    proven = sum(1 for t in all_tasks if t["status"] == "proven")
     done_ok, blockers = quality.done_state(cfg)
     return {
-        "tasks": all_tasks,
-        "proven": proven,
-        "total": len(all_tasks),
         "gates": ledger.gate_stats(cfg),
         "catch_rates": ledger.catch_rates(cfg),
         "open_criticals": ledger.open_criticals(cfg),
@@ -140,9 +135,9 @@ class Handler(BaseHTTPRequestHandler):
         return json_i < 0 or html_i < json_i
 
     def _is_spa_path(self, path: str) -> bool:
-        if path in ("/", "/chat", "/tree", "/approve", "/report", "/settings", "/canvas"):
+        if path in ("/", "/chat", "/settings", "/canvas"):
             return True
-        for prefix in ("/chat/", "/tree/", "/approve/", "/report/", "/settings/", "/canvas/"):
+        for prefix in ("/chat/", "/settings/", "/canvas/"):
             if path.startswith(prefix):
                 return True
         return False
@@ -150,7 +145,7 @@ class Handler(BaseHTTPRequestHandler):
     # -- routes ----------------------------------------------------------
     def do_GET(self) -> None:
         assert CFG is not None
-        from . import ledger, sessions, tasks, trust
+        from . import ledger, sessions, trust
         from . import security as sec
 
         u = urlparse(self.path)
@@ -207,33 +202,19 @@ class Handler(BaseHTTPRequestHandler):
                                     "version": "1.0.0", "llm_reachable": reachable,
                                     "llm_detail": detail})
         # Everything below requires auth (covers /api/* and bare aliases per doc 06)
-        needs_auth = u.path.startswith("/api/") or u.path in ("/tree", "/job", "/report", "/ledger", "/approve", "/waive", "/rollback", "/revert", "/prove", "/send-back")
+        needs_auth = u.path.startswith("/api/") or u.path in ("/ledger", "/waive")
         if needs_auth and not self._require_auth(q):
             return
-        if u.path in ("/tree", "/api/tree"):
-            return self._send_json({"tasks": tasks.list_all(CFG), "tree": tasks.to_tree(CFG)})
         if u.path in ("/ledger", "/api/ledger"):
             return self._send_json({"gates": ledger.gate_stats(CFG),
                                     "catch_rates": ledger.catch_rates(CFG),
                                     "open_criticals": ledger.open_criticals(CFG),
                                     "open_issues": len(ledger.open_issues(CFG))})
-        if u.path in ("/report", "/api/report"):
+        if u.path == "/api/report":
+            # Ledger summary
             return self._send_json(_report(CFG))
-        if u.path in ("/job", "/api/job"):
-            from .errors import TaskNotFound
-            node_id = (q.get("id", [""])[0] or "").strip()
-            if not node_id:
-                return self._send_json({"error": "missing ?id=", "code": 400}, 400)
-            try:
-                return self._send_json(tasks.get(CFG, node_id))
-            except (KeyError, TaskNotFound):
-                return self._send_json({"error": "no such task", "code": 404}, 404)
-        if u.path in ("/approve",) and not self._prefers_html():
-            # Bare /approve API alias (doc 06): pending review candidates as JSON.
-            waiting = [t for t in tasks.list_all(CFG) if t.get("status") in ("waiting", "doing")]
-            return self._send_json({"pending": waiting, "count": len(waiting)})
         if u.path == "/api/metrics":
-            return self._send_json({"tasks": tasks.stats(CFG), "ledger": ledger.report(CFG),
+            return self._send_json({"ledger": ledger.report(CFG),
                                     "fatigue": trust.fatigue(CFG), "sink": sec.sink_audit(CFG)})
         if u.path == "/api/sink":
             return self._send_json(sec.sink_audit(CFG))
@@ -327,16 +308,8 @@ class Handler(BaseHTTPRequestHandler):
                 "spans": _agents.list_spans(CFG, session_id=sid, status=status, limit=lim),
             })
         if u.path == "/api/diff":
-            # Review surface: git diff for task files. Empty paths → no whole-repo dump.
+            # Review surface: git diff for explicit paths. Empty paths → no whole-repo dump.
             paths = [p for p in (q.get("path", []) or []) if str(p).strip()]
-            tid = (q.get("id", [""])[0] or "").strip()
-            if tid and not paths:
-                try:
-                    from .errors import TaskNotFound as _TNF
-                    node = tasks.get(CFG, tid)
-                    paths = [str(f) for f in (node.get("files") or []) if str(f).strip()]
-                except Exception:
-                    paths = []
             if not paths:
                 return self._send_json({
                     "ok": True, "diff": "", "paths": [], "empty": True,
@@ -366,28 +339,6 @@ class Handler(BaseHTTPRequestHandler):
                 "empty": not bool((text or "").strip()),
                 "error": None if text.strip() or not last_err else last_err,
             })
-        if u.path == "/api/spec":
-            from .errors import TaskNotFound
-            tid = (q.get("id", [""])[0] or "").strip()
-            if not tid:
-                return self._send_json({"error": "missing ?id=", "code": 400}, 400)
-            # Pinned contract from specs.json (via `spec pin`); falls back to an
-            # unpinned draft derived from the task's done-looks-like text.
-            try:
-                t = tasks.get(CFG, tid)
-                from . import spec as _spec
-                pinned = _spec.get_spec(CFG, tid)
-                if pinned:
-                    return self._send_json({"task": t, "spec": pinned})
-                draft = (t.get("done") or "").strip()
-                return self._send_json({"task": t, "spec": {
-                    "task_id": tid,
-                    "acceptance": [draft] if draft else [],
-                    "pinned": False,
-                    "hint": "no pinned spec — run `spec pin <id> <acceptance...>` or POST /api/spec/pin",
-                }})
-            except (KeyError, TaskNotFound):
-                return self._send_json({"error": "no such task", "code": 404}, 404)
         if u.path == "/api/sessions":
             rows = sessions.list_all(CFG)
             for r in rows:
@@ -405,10 +356,6 @@ class Handler(BaseHTTPRequestHandler):
             out = dict(s)
             out["generating"] = _chat_run_active(sid)
             return self._send_json(out)
-        if u.path == "/api/leaf":
-            from . import tasks as _tasks
-            leaf = _tasks.leaf(CFG)
-            return self._send_json({"leaf": leaf, "rendered": _tasks.render_leaf(leaf) if leaf else "No actionable leaf"})
         # Deep-link fallback for unknown SPA paths (no file extension)
         if self._prefers_html() and "." not in u.path.rsplit("/", 1)[-1]:
             return self._send_file("index.html")
@@ -416,61 +363,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         assert CFG is not None
-        from . import harness, ledger, sessions, tasks, trust
+        from . import harness, ledger, sessions, trust
 
         u = urlparse(self.path)
         q = parse_qs(u.query)
         path_no_q = self.path.split("?")[0]
-        # Auth: all POST except health require token (covers /api/* and bare /approve alias per doc 06)
+        # Auth: all POST except health require token
         if path_no_q not in ("/api/health", "/health") and not self._require_auth(q):
             return
         try:
             body = self._body()
         except ValueError as e:
             return self._send_json({"error": str(e), "code": 400}, 400)
-        from .errors import TaskNotFound, TaskValidation
         try:
-            if path_no_q in ("/api/prove", "/prove"):
-                tid, proof = str(body.get("id", "")), str(body.get("proof", ""))
-                if not tid or not proof:
-                    return self._send_json({"error": "id and proof required", "code": 400}, 400)
-                try:
-                    tasks.prove(CFG, tid, proof)
-                except TaskNotFound:
-                    return self._send_json({"error": "no such task", "code": 404}, 404)
-                except TaskValidation as e:
-                    return self._send_json({"error": str(e), "code": 400}, 400)
-                ledger.log_gate(CFG, "prove", "F10", "pass", detail=f"proved {tid}")
-                return self._send_json({"ok": True})
-            if path_no_q in ("/api/task", "/task"):
-                title = str(body.get("title", "")).strip()
-                if not title:
-                    return self._send_json({"error": "title required", "code": 400}, 400)
-                try:
-                    nid = tasks.add(
-                        CFG,
-                        title,
-                        done=str(body.get("done") or body.get("done_looks_like") or ""),
-                        parent=body.get("parent"),
-                        why=str(body.get("why") or ""),
-                    )
-                    node = tasks.get(CFG, nid)
-                except Exception as e:
-                    return self._send_json({"error": str(e), "code": 400}, 400)
-                return self._send_json({"ok": True, "id": nid, "task": node})
-            if path_no_q in ("/api/approve", "/approve"):
-                tid = str(body.get("id", ""))
-                if not tid:
-                    return self._send_json({"error": "id required", "code": 400}, 400)
-                try:
-                    tasks.prove(CFG, tid, f"human-approved: {body.get('note', '')}")
-                except TaskNotFound:
-                    return self._send_json({"error": "no such task", "code": 404}, 404)
-                except TaskValidation as e:
-                    return self._send_json({"error": str(e), "code": 400}, 400)
-                ledger.log_gate(CFG, "human", "F7", "pass", detail=f"approved {tid}")
-                trust.record_approval(CFG, "approve", True)
-                return self._send_json({"ok": True})
             if path_no_q in ("/api/waive", "/waive"):
                 text = str(body.get("text", "")).strip()
                 if not text:
@@ -494,46 +399,6 @@ class Handler(BaseHTTPRequestHandler):
                                  expires=expires, owner=str(body.get("owner", "")))
                 ledger.log_gate(CFG, "waiver", "F7", "pass", detail=text[:200])
                 return self._send_json({"ok": True})
-            if path_no_q in ("/api/send-back", "/send-back"):
-                tid = str(body.get("id", ""))
-                if not tid:
-                    return self._send_json({"error": "id required", "code": 400}, 400)
-                try:
-                    tasks.set_status(CFG, tid, "doing")
-                except TaskNotFound:
-                    return self._send_json({"error": "no such task", "code": 404}, 404)
-                except TaskValidation as e:
-                    return self._send_json({"error": str(e), "code": 400}, 400)
-                ledger.add_issue(CFG, "major", "review", f"sent back {tid}: {body.get('note', '')}")
-                trust.record_approval(CFG, "approve", False)
-                return self._send_json({"ok": True})
-            if path_no_q in ("/api/rollback", "/rollback", "/api/revert", "/revert"):
-                tid = str(body.get("id", "") or body.get("to_id", "") or body.get("pivot", "")).strip()
-                if not tid:
-                    return self._send_json({"error": "id (pivot) required", "code": 400}, 400)
-                try:
-                    reopened = tasks.rollback(CFG, tid)
-                except (KeyError, TaskNotFound):
-                    return self._send_json({"error": "no such task", "code": 404}, 404)
-                ledger.log_gate(CFG, "rollback", "F2", "pass", detail=f"rollback to {tid} reopened {reopened}")
-                return self._send_json({"ok": True, "reopened": reopened})
-            if path_no_q in ("/api/spec/pin", "/spec/pin"):
-                tid = str(body.get("id", "")).strip()
-                acceptance = body.get("acceptance", [])
-                if isinstance(acceptance, str):
-                    acceptance = [acceptance]
-                if not tid:
-                    return self._send_json({"error": "id required", "code": 400}, 400)
-                try:
-                    task = tasks.get(CFG, tid)
-                except (KeyError, TaskNotFound):
-                    return self._send_json({"error": "no such task", "code": 404}, 404)
-                try:
-                    from . import spec as _specmod
-                    s = _specmod.pin_spec(CFG, task, [str(a) for a in acceptance])
-                    return self._send_json({"ok": True, "spec": s})
-                except Exception as e:
-                    return self._send_json({"error": str(e), "code": 400}, 400)
             if path_no_q == "/api/agents":
                 from . import agents as _agents
                 from .errors import StoreError as _SE
@@ -610,8 +475,10 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if action == "approve":
                         cap = _caps.approve(CFG, cid, actor="user")
+                        trust.record_approval(CFG, "capability", True)
                     elif action == "reject":
                         cap = _caps.reject(CFG, cid, actor="user", reason=str(body.get("reason") or ""))
+                        trust.record_approval(CFG, "capability", False)
                     elif action == "install":
                         cap = _caps.install(CFG, cid, actor="user", require_approved=True)
                     elif action == "retire":
@@ -637,7 +504,6 @@ class Handler(BaseHTTPRequestHandler):
                             str(body.get("text") or body.get("claim") or ""),
                             source=str(body.get("source") or "human"),
                             taint=str(body.get("taint") or "human"),
-                            task_id=str(body.get("task_id") or ""),
                             verification=str(body.get("verification") or "human"),
                         )
                         return self._send_json({"ok": True, "claim": claim})
@@ -648,6 +514,7 @@ class Handler(BaseHTTPRequestHandler):
                             claim_id=int(body["id"]) if body.get("id") is not None and str(body.get("id")) != "" else None,
                             verification=str(body.get("verification") or "verified"),
                         )
+                        trust.record_approval(CFG, "memory", True)
                         return self._send_json({"ok": True, "claim": claim})
                     if action == "supersede":
                         claim = _mem.supersede(
@@ -678,6 +545,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if action == "approve":
                         spec = _agents.approve_agent(CFG, aid, actor="user")
+                        trust.record_approval(CFG, "agent", True)
                     elif action == "archive":
                         spec = _agents.archive_agent(CFG, aid, actor="user")
                     elif action == "run":
@@ -927,6 +795,10 @@ class Handler(BaseHTTPRequestHandler):
                     except (BrokenPipeError, ConnectionResetError):
                         client_gone = True
 
+                # Bind session before first token so the UI can poll/heal mid-run
+                # (new chats start with session_id=null and otherwise never heal).
+                _emit({"session_id": sid, "started": True})
+
                 try:
                     from . import approvals as _appr
                     tools_on = bool((CFG.get("tools") or {}).get("enabled", True))
@@ -1130,10 +1002,6 @@ class Handler(BaseHTTPRequestHandler):
                 return
         except KeyError as e:
             return self._send_json({"error": str(e), "code": 404}, 404)
-        except TaskNotFound:
-            return self._send_json({"error": "no such task", "code": 404}, 404)
-        except TaskValidation as e:
-            return self._send_json({"error": str(e), "code": 400}, 400)
         except ValueError as e:
             return self._send_json({"error": str(e), "code": 400}, 400)
         except Exception as e:
@@ -1203,7 +1071,6 @@ def _watch_config():
                         except Exception as e:
                             print(f"[hot-reload] failed: {e}")
                     last = mt
-                # also watch .super/tasks.json and sessions for external edits — no action, just keep mtime
             except Exception:
                 pass
             time.sleep(2)
@@ -1252,5 +1119,5 @@ def serve(cfg: dict) -> None:
     print(f"  local:  http://127.0.0.1:{port}/")
     for u in _lan_urls(port):
         print(f"  lan:    {u}")
-    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/capabilities /api/intelligence /api/spans /api/memory /api/fs/pick")
+    print("API: /api/report /api/ledger /api/metrics /api/agents /api/capabilities /api/intelligence /api/spans /api/memory /api/approvals /api/fs/pick")
     httpd.serve_forever()

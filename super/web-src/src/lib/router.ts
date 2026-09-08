@@ -1,7 +1,6 @@
 /**
  * Lightweight History API router — no react-router dep.
- * Paths: /chat[/:id] | /tree[/:id] | /approve[/:id] | /report
- * Tree query: ?q=&status=&sort=
+ * Paths: /chat[/:id] | /settings | /canvas
  * Preserves unrelated search params (e.g. ?token=).
  */
 import {
@@ -17,23 +16,14 @@ import {
   type ReactNode,
 } from 'react';
 
-export type View = 'chat' | 'tree' | 'approve' | 'report' | 'settings' | 'canvas';
-
-export type TreeFilter = 'all' | 'waiting' | 'doing' | 'proven' | 'blocked';
-export type TreeSort = 'id' | 'status';
+export type View = 'chat' | 'settings' | 'canvas';
 
 export type Route =
   | { view: 'chat'; sessionId: string | null }
-  | { view: 'tree'; taskId: string | null; q: string; status: TreeFilter; sort: TreeSort }
-  | { view: 'approve'; taskId: string | null }
-  | { view: 'report' }
   | { view: 'settings' }
   | { view: 'canvas' };
 
-const VIEWS = new Set<View>(['chat', 'tree', 'approve', 'report', 'settings', 'canvas']);
-const TREE_STATUS = new Set<TreeFilter>(['all', 'waiting', 'doing', 'proven', 'blocked']);
-const TREE_SORT = new Set<TreeSort>(['id', 'status']);
-const ROUTE_QUERY = new Set(['q', 'status', 'sort']);
+const VIEWS = new Set<View>(['chat', 'settings', 'canvas']);
 
 const LISTENERS = new Set<() => void>();
 let snapshot = locationSnapshot();
@@ -66,26 +56,15 @@ function cleanSeg(s: string | null | undefined): string | null {
   return t || null;
 }
 
-export function parsePath(pathname: string, search = ''): Route {
+export function parsePath(pathname: string, _search = ''): Route {
   const segs = pathname.replace(/\/+$/, '').split('/').filter(Boolean);
-  const viewRaw = (segs[0] || 'chat') as View;
-  const view: View = VIEWS.has(viewRaw) ? viewRaw : 'chat';
-  const id = cleanSeg(segs[1] ?? null);
-  const qs = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-
-  if (view === 'tree') {
-    const statusRaw = (qs.get('status') || 'all') as TreeFilter;
-    const sortRaw = (qs.get('sort') || 'id') as TreeSort;
-    return {
-      view: 'tree',
-      taskId: id,
-      q: qs.get('q') || '',
-      status: TREE_STATUS.has(statusRaw) ? statusRaw : 'all',
-      sort: TREE_SORT.has(sortRaw) ? sortRaw : 'id',
-    };
+  const viewRaw = segs[0] || 'chat';
+  // Legacy SPA paths → chat
+  if (viewRaw === 'tree' || viewRaw === 'approve' || viewRaw === 'report') {
+    return { view: 'chat', sessionId: null };
   }
-  if (view === 'approve') return { view: 'approve', taskId: id };
-  if (view === 'report') return { view: 'report' };
+  const view: View = VIEWS.has(viewRaw as View) ? (viewRaw as View) : 'chat';
+  const id = cleanSeg(segs[1] ?? null);
   if (view === 'settings') return { view: 'settings' };
   if (view === 'canvas') return { view: 'canvas' };
   return { view: 'chat', sessionId: id };
@@ -94,19 +73,8 @@ export function parsePath(pathname: string, search = ''): Route {
 /** Build path+query for a route, merging preserved search params (token, etc.). */
 export function hrefFor(route: Partial<Route> & { view: View }, currentSearch?: string): string {
   const qs = new URLSearchParams(currentSearch ?? (typeof window !== 'undefined' ? window.location.search : ''));
-  for (const k of ROUTE_QUERY) qs.delete(k);
-
   let path = `/${route.view}`;
   if (route.view === 'chat' && route.sessionId) path += `/${encodeURIComponent(route.sessionId)}`;
-  if (route.view === 'tree' && route.taskId) path += `/${encodeURIComponent(route.taskId)}`;
-  if (route.view === 'approve' && route.taskId) path += `/${encodeURIComponent(route.taskId)}`;
-
-  if (route.view === 'tree') {
-    if (route.q?.trim()) qs.set('q', route.q.trim());
-    if (route.status && route.status !== 'all') qs.set('status', route.status);
-    if (route.sort && route.sort !== 'id') qs.set('sort', route.sort);
-  }
-
   const q = qs.toString();
   return q ? `${path}?${q}` : path;
 }

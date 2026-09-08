@@ -119,7 +119,7 @@ def check_write(cfg: dict, candidate: str, existing: dict[str, str],
         pass
     else:
         if len(candidate.splitlines()) > cfg.get("quality", {}).get("max_loc_per_edit", 300):
-            return False, "edit exceeds max_loc_per_edit budget — split the microtask"
+            return False, "edit exceeds max_loc_per_edit budget — split the edit"
     if cfg.get("gates", {}).get("duplication", True):
         dup, score = find_duplicate(candidate, existing)
         if dup and not waiver:

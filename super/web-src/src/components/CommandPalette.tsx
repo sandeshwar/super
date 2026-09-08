@@ -19,14 +19,7 @@ export function CommandPalette({ items }: { items: Item[] }) {
         setOpen((v) => !v);
         return;
       }
-      // "/" opens palette only when not on Tasks (Tasks uses / for search focus)
       if (e.key === '/' && !open && !typing) {
-        const path = window.location.pathname;
-        if (path === '/tree' || path.startsWith('/tree/')) {
-          e.preventDefault();
-          window.dispatchEvent(new CustomEvent('super-focus-search'));
-          return;
-        }
         e.preventDefault();
         setOpen(true);
       }
@@ -75,7 +68,7 @@ export function CommandPalette({ items }: { items: Item[] }) {
         <input
           ref={inputRef}
           className="cmdk-input"
-          placeholder="Type a command — try chat, tasks, review…"
+          placeholder="Type a command — try chat, settings…"
           value={q}
           aria-controls={listId}
           aria-activedescendant={filtered[idx] ? `${listId}-${filtered[idx].id}` : undefined}

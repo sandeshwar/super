@@ -153,16 +153,3 @@ export interface SessionSummary {
   parent?: string | null;
   generating?: boolean;
 }
-
-export interface TaskNode {
-  id: string;
-  title: string;
-  why: string;
-  done: string;
-  needs: string[];
-  blocks: string[];
-  files: string[];
-  parent: string | null;
-  proof: string;
-  status: 'waiting' | 'doing' | 'proven' | 'blocked';
-}

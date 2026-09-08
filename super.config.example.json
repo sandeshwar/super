@@ -7,9 +7,9 @@
     "health_path": "/api/tags"
   },
   "envelope": {
-    "max_microtask_lines": 50,
+    "max_reply_lines": 50,
     "best_of_n": 5,
-    "max_steps_per_task": 20,
+    "max_tool_steps": 20,
     "early_abort_stall": 3
   },
   "gates": {
@@ -19,8 +19,6 @@
     "duplication": true,
     "verification": true,
     "mutation": true,
-    "spec": true,
-    "drift": true,
     "quality": true,
     "security": true,
     "taint": true,
@@ -50,7 +48,7 @@
     "auto_pass_max_blast": 2,
     "fatigue_approve_threshold": 0.95,
     "fatigue_window": 40,
-    "attention_budget_per_task": 10
+    "attention_budget": 10
   },
   "ambition": {
     "default_loa": 4,

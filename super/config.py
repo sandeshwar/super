@@ -28,9 +28,9 @@ DEFAULTS = {
         "think": True,
     },
     "envelope": {
-        "max_microtask_lines": 50,
+        "max_reply_lines": 50,
         "best_of_n": 5,
-        "max_steps_per_task": 20,
+        "max_tool_steps": 20,
         "early_abort_stall": 3,
     },
     "gates": {
@@ -40,8 +40,6 @@ DEFAULTS = {
         "duplication": True,
         "verification": True,
         "mutation": True,
-        "spec": True,
-        "drift": True,
         "quality": True,
         "security": True,
         "taint": True,
@@ -67,7 +65,7 @@ DEFAULTS = {
         "auto_pass_max_blast": 2,
         "fatigue_approve_threshold": 0.95,
         "fatigue_window": 40,
-        "attention_budget_per_task": 10,
+        "attention_budget": 10,
     },
     "ambition": {
         "default_loa": 4,
@@ -88,7 +86,6 @@ DEFAULTS = {
             "shell": True,
             "git": True,
             "web": False,
-            "tasks": True,
             "memory": True,
             "project": True,
             "agents": True,
@@ -191,6 +188,8 @@ def find_config(start: str | None = None) -> str | None:
         d = parent
 
 
+
+
 def _validate(cfg: dict) -> None:
     try:
         if not isinstance(cfg["llm"]["endpoint"], str) or not cfg["llm"]["endpoint"].startswith("http"):
@@ -212,7 +211,7 @@ def _validate(cfg: dict) -> None:
                 "llm.think must be boolean or one of off|low|medium|high|max"
             )
         env = cfg["envelope"]
-        for k in ("max_microtask_lines", "best_of_n", "max_steps_per_task"):
+        for k in ("max_reply_lines", "best_of_n", "max_tool_steps"):
             if not isinstance(env[k], int) or env[k] < 1 or env[k] > 1000:
                 raise ConfigError(f"envelope.{k} must be an int in [1, 1000]")
         for section, key in _BOOL_KEYS:
@@ -380,6 +379,7 @@ def apply_patch(cfg: dict, patch: dict) -> dict:
     for pk in ("_root", "_config_path", "server", "state_dir"):
         if pk in cfg:
             merged[pk] = cfg[pk]
+    _migrate_legacy_keys(merged, safe_patch)
     _validate(merged)
     return merged
 
@@ -430,10 +430,10 @@ def save(cfg: dict) -> None:
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
                 existing = json.load(f)
-        # only persist known top-level keys
         for k in ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools", "server", "state_dir"):
             if k in cfg:
                 existing[k] = cfg[k]
+        _migrate_legacy_keys(existing, existing)
         # Prefer project-relative state_dir in the on-disk file (load() resolves abs).
         root = cfg.get("_root")
         sd = existing.get("state_dir")
@@ -474,8 +474,70 @@ def _apply_env_overrides(cfg: dict) -> dict:
     return cfg
 
 
+def _migrate_legacy_keys(cfg: dict, user: dict | None = None) -> dict:
+    """Fold renamed envelope/trust keys from older config files into current names.
+
+    Deep-merge injects DEFAULT new keys (e.g. max_tool_steps=20) alongside a
+    user's old max_steps_per_task=200 — without this, runtime silently uses 20.
+    User-file new names always win; legacy names only fill when the new name
+    was never set in the user file.
+    """
+    user = user if isinstance(user, dict) else {}
+    uenv = user.get("envelope") if isinstance(user.get("envelope"), dict) else {}
+    utrust = user.get("trust") if isinstance(user.get("trust"), dict) else {}
+    env = cfg.setdefault("envelope", {})
+    trust = cfg.setdefault("trust", {})
+    if not isinstance(env, dict):
+        cfg["envelope"] = {}
+        env = cfg["envelope"]
+    if not isinstance(trust, dict):
+        cfg["trust"] = {}
+        trust = cfg["trust"]
+
+    # New names in the user file always win; legacy only fills when unset.
+    if "max_tool_steps" not in uenv:
+        src = uenv if "max_steps_per_task" in uenv else env
+        if "max_steps_per_task" in src:
+            try:
+                env["max_tool_steps"] = int(src["max_steps_per_task"])
+            except (TypeError, ValueError):
+                pass
+    env.pop("max_steps_per_task", None)
+
+    if "max_reply_lines" not in uenv:
+        src = uenv if "max_microtask_lines" in uenv else env
+        if "max_microtask_lines" in src:
+            try:
+                env["max_reply_lines"] = int(src["max_microtask_lines"])
+            except (TypeError, ValueError):
+                pass
+    env.pop("max_microtask_lines", None)
+
+    if "attention_budget" not in utrust:
+        src = utrust if "attention_budget_per_task" in utrust else trust
+        if "attention_budget_per_task" in src:
+            try:
+                trust["attention_budget"] = int(src["attention_budget_per_task"])
+            except (TypeError, ValueError):
+                pass
+    trust.pop("attention_budget_per_task", None)
+
+    # Drop removed gate / tool-group leftovers from older configs.
+    gates = cfg.get("gates")
+    if isinstance(gates, dict):
+        for dead in ("spec", "drift"):
+            gates.pop(dead, None)
+    tools = cfg.get("tools")
+    if isinstance(tools, dict):
+        groups = tools.get("groups")
+        if isinstance(groups, dict):
+            groups.pop("tasks", None)
+    return cfg
+
+
 def load(path: str | None = None) -> dict:
     path = path or find_config()
+    user: dict | None = None
     if path and os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
@@ -491,6 +553,7 @@ def load(path: str | None = None) -> dict:
         cfg = json.loads(json.dumps(DEFAULTS))
         cfg["_config_path"] = None
         cfg["_root"] = os.getcwd()
+    _migrate_legacy_keys(cfg, user)
     _apply_env_overrides(cfg)
     if not os.path.isabs(cfg["state_dir"]):
         cfg["state_dir"] = os.path.join(cfg["_root"], cfg["state_dir"])
@@ -513,6 +576,7 @@ def load_workspace(root: str) -> dict:
     cfg = json.loads(json.dumps(DEFAULTS))
     cfg["_config_path"] = None
     cfg["_root"] = root
+    _migrate_legacy_keys(cfg, None)
     _apply_env_overrides(cfg)
     if not os.path.isabs(cfg["state_dir"]):
         cfg["state_dir"] = os.path.join(cfg["_root"], cfg["state_dir"])

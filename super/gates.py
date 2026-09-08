@@ -20,10 +20,8 @@ REGISTRY = {
     "grounding": ("F1", "no symbol without observation evidence"),
     "docs": ("F1", "library symbols must be in version-pinned docs"),
     "contract": ("F1", "standards + duplication enforced at write time"),
-    "verification": ("F1", "lint/type per edit, tests per subtask/commit"),
+    "verification": ("F1", "lint/type per edit, tests per change-set/commit"),
     "mutation": ("F4", "vacuous tests cannot gate anything"),
-    "spec": ("F2b", "failing acceptance tests required before build"),
-    "drift": ("F2b", "isolated probe diffs spec vs actual diff"),
     "quality": ("F1", "LOC/complexity/nesting budgets + debt ledger"),
     "secrets": ("F5", "secret material blocked at write time"),
     "sast": ("F5", "known-bad code patterns blocked"),
@@ -358,21 +356,12 @@ def run_write_gates(cfg: dict, source: str, where: str = "",
                     scrape_docs_versioned(cfg, top, "pinned")
         except Exception:
             pass
-    # 4. Spec/drift: if a spec is active, probe for drift (non-blocking unless configured)
-    if cfg.get("gates", {}).get("spec", True) or cfg.get("gates", {}).get("drift", True):
-        try:
-            from . import spec as _spec
-            # if no active spec, this is a no-op; otherwise caller should have pinned spec
-            # we treat missing spec as not blocking per doc 02 §1 (task rejected earlier)
-            pass
-        except Exception:
-            pass
-    # 5. Quality budgets
+    # 4. Quality budgets
     if cfg.get("gates", {}).get("quality", True):
         ok, violations = quality.check_budgets(cfg, source, where)
         if not ok:
             blockers.extend(violations)
-    # 6. Security (secrets/sast/taint/dependency)
+    # 5. Security (secrets/sast/taint/dependency)
     if cfg.get("gates", {}).get("security", True):
         try:
             security.enforce_write(cfg, source, where, context_taints)

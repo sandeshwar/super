@@ -10,7 +10,7 @@ Per *On the Fundamental Limits of LLMs at Scale* (arXiv 2511.12869), plus observ
 |---|-------|---------------------------|
 | 1 | Hallucination | Invents APIs, params, facts. Rises with capability. |
 | 2 | Context rot | Effective window far smaller than advertised; recall degrades non-linearly. Small models rot faster. |
-| 3 | Reasoning degradation | Worse the longer it runs; steep on hard tasks. |
+| 3 | Reasoning degradation | Worse the longer it runs; steep on hard problems. |
 | 4 | Retrieval fragility | RAG breaks on multi-hop / nuanced queries. |
 | 5 | Frozen knowledge | Cutoff lags release by months; no temporal reasoning; edits don't scale (ripple effects). |
 | 6 | Metacognition gap | Cannot reliably report why it failed; confidence diverges from reliability. Only outcome rates (pass/fail) are trustworthy. |
@@ -21,7 +21,7 @@ Smaller models show every row worse — which is why the harness must carry more
 
 Every item below is reported against coding agents daily:
 
-outdated syntax; library/language version mismatch; ignoring coding standards / AGENTS.md / CONTRIBUTING.md; duplication; reinventing in-repo utilities; bloated files; no reusability / maintainability / efficiency / performance / security / reliability focus; not using latest versions; lack of environment knowledge; memory-over-docs; not using tools (grep, linters, type-checkers, tests); issues pile up silently; no depth or breadth (low-poly villa — see doc 05); context overflow on long tasks; flat 1D todo lists that lose depth, order, and proof.
+outdated syntax; library/language version mismatch; ignoring coding standards / AGENTS.md / CONTRIBUTING.md; duplication; reinventing in-repo utilities; bloated files; no reusability / maintainability / efficiency / performance / security / reliability focus; not using latest versions; lack of environment knowledge; memory-over-docs; not using tools (grep, linters, type-checkers, tests); issues pile up silently; no depth or breadth (low-poly villa — see doc 05); context overflow on long runs; shallow todos that lose priority and proof.
 
 Root cause in one sentence:
 
@@ -43,9 +43,9 @@ Caveat: true for knowledge in repo/docs (styles, versions, symbols). False for k
 | F7 | Unmodeled human | Approval fatigue (40 prompts/hr, 98% approve) + cherry-picked builder summaries launder risk as consent. |
 | F8 | Co-evolution rot | Gates encode "model cannot do X"; models update; gates never deleted. All brakes, no steering. |
 | F9 | Attribution blindness | Logs record errors, not passes. Can't say which layer failed → can't evolve, can't price gates. |
-| F10 | Small context + flat plan | Context is accumulated flat until it rots; plan is a 1D todo with no depth (parent/child), no order (depends-on/blocks), no proof (which check closed it). Long tasks fail structurally. |
+| F10 | Small context + flat plan | Context is accumulated flat until it rots; plan is a shallow todo with no priority, no durable steering, no proof of what closed a goal. Long runs fail structurally. |
 
-F10 is load-bearing for small models: the harness must hold the full task graph on disk and show the model one leaf at a time.
+F10 is load-bearing for small models: the harness must keep context compiled and small, and steer long work with an agenda + tools — not dump the whole plan into the prompt.
 
 ## 4. What this system is not
 

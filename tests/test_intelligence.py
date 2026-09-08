@@ -21,7 +21,7 @@ def _cfg(tmpdir: str) -> dict:
             "groups": {
                 "files": True, "search": True, "git": True, "project": True,
                 "capabilities": True, "intelligence": True, "agents": True,
-                "tasks": True, "memory": True,
+                "memory": True,
             },
             "disabled": [],
             "packs": {},
@@ -52,18 +52,13 @@ class TestIntelligence(unittest.TestCase):
     def tearDown(self):
         self._td.cleanup()
 
-    def test_tick_seeds_tasks_and_forges(self):
+    def test_tick_forges_and_seeds_memory(self):
         ensure_bridge(self.cfg)
         result = I.tick(self.cfg, force=True)
         self.assertTrue(result["ok"])
         agenda = I.list_agenda(self.cfg)
-        # empty workspace should produce task/memory/forge findings (some auto-done)
+        # empty workspace should produce memory/forge findings (some auto-done)
         self.assertTrue(agenda or result["auto_act"].get("acted"))
-
-        from super import tasks
-        nodes = tasks.list_all(self.cfg)
-        # seed_tasks should have created cards
-        self.assertGreaterEqual(len(nodes), 1)
 
         # repo_pulse recipe should install
         self.assertIn("repo_pulse", catalog.TOOLS)

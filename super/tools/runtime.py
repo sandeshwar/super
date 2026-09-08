@@ -72,7 +72,7 @@ def tools_system_addon(cfg: dict) -> str:
             "pursue_agenda / dismiss_agenda — pursue high/critical gaps without waiting. "
             "Memory: memory_search before re-deriving known facts; memory_add for durable "
             "claims worth recalling (prefer short atomic facts). memory_confirm after you "
-            "verify a claim. Auto-stored search/prove claims show up under Verified context. "
+            "verify a claim. Auto-stored search claims show up under Verified context. "
             "Canvas: when the user benefits from a standalone visual (web page, image, video, "
             "markdown/HTML doc), search_tools query=canvas then activate canvas_present "
             "(kinds: url|image|video|markdown|html|file|doc). Use canvas_update to refresh, "
@@ -211,7 +211,7 @@ def run_agent_stdlib(
     from .. import llm
 
     cfg.pop("_tool_session", None)  # fresh activation set per turn
-    max_steps = max(1, int(cfg.get("envelope", {}).get("max_steps_per_task", 20)))
+    max_steps = max(1, int(cfg.get("envelope", {}).get("max_tool_steps", 20)))
     eff = cfg.get("_agent_effective") if isinstance(cfg.get("_agent_effective"), dict) else None
     if eff and eff.get("max_steps"):
         max_steps = max(1, min(max_steps, int(eff["max_steps"])))
@@ -358,7 +358,7 @@ def run_agent_stream(
         pass
 
     cfg.pop("_tool_session", None)
-    max_steps = max(1, int(cfg.get("envelope", {}).get("max_steps_per_task", 20)))
+    max_steps = max(1, int(cfg.get("envelope", {}).get("max_tool_steps", 20)))
     eff = cfg.get("_agent_effective") if isinstance(cfg.get("_agent_effective"), dict) else None
     if eff and eff.get("max_steps"):
         max_steps = max(1, min(max_steps, int(eff["max_steps"])))

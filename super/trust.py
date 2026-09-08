@@ -38,15 +38,15 @@ def blast_radius(changed_files: list[str], loc_delta: int = 0) -> int:
 
 
 def route(cfg: dict, changed_files: list[str], loc_delta: int = 0,
-          proven_record: bool = False) -> tuple[str, int, str]:
+          track_record: bool = False) -> tuple[str, int, str]:
     """Returns (decision, radius, reason).
 
     decision is 'auto-pass' (small + proven, logged) or 'human-required'.
     """
     radius = blast_radius(changed_files, loc_delta)
     auto_max = int(cfg.get("trust", {}).get("auto_pass_max_blast", 2))
-    if radius <= auto_max and proven_record:
-        return "auto-pass", radius, f"radius {radius} ≤ {auto_max} with proven record"
+    if radius <= auto_max and track_record:
+        return "auto-pass", radius, f"radius {radius} ≤ {auto_max} with track record"
     if radius >= 3:
         return "human-required", radius, f"radius {radius}: sensitive or large blast radius"
     return "human-required", radius, f"radius {radius}: default human review"

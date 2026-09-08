@@ -1,6 +1,4 @@
 import { api } from '../../api';
-import type { TaskNode } from '../../types';
-import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { Collapsible } from '../ui/Collapsible';
 import { Progress } from '../ui/Progress';
@@ -13,7 +11,6 @@ import type { Stats } from './hooks/useAppData';
 
 type Props = {
   view: View;
-  tasks: TaskNode[];
   gates: Record<string, { pass: number; reject: number }>;
   criticals: unknown[];
   stats: Stats;
@@ -28,12 +25,11 @@ type Props = {
   collapsed: boolean;
   onToggleCollapsed: () => void;
   refresh: () => void;
-  onOpenProblems?: () => void;
 };
 
 export function Sidebar({
-  view, tasks, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash,
-  error, setError, offlinePending, mobileNav, collapsed, onToggleCollapsed, refresh, onOpenProblems,
+  view, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash,
+  error, setError, offlinePending, mobileNav, collapsed, onToggleCollapsed, refresh,
 }: Props) {
   const applyWorkspace = async (path: string) => {
     try {
@@ -82,9 +78,8 @@ export function Sidebar({
       <nav className="sidebar-nav" aria-label="Main">
         <div className="nav-section">
           <div className="nav-label">Pages <span className="mono muted" style={{ textTransform: 'none', letterSpacing: 0, fontWeight: 400 }}>⌘K</span></div>
-          {(['chat', 'tree', 'approve', 'report'] as View[]).map((v) => {
+          {(['chat'] as View[]).map((v) => {
             const Icon = Icons[VIEW_META[v].icon];
-            const count = v === 'tree' ? tasks.length : v === 'approve' ? stats.pending : v === 'report' ? stats.proven : undefined;
             const isActive = view === v;
             return (
               <Link
@@ -96,12 +91,6 @@ export function Sidebar({
               >
                 <Icon size={16} />
                 <span className="nav-item-label" style={{ flex: 1, textAlign: 'left' }}>{VIEW_META[v].title}</span>
-                {v === 'approve' && stats.pending > 0 && !isActive && (
-                  <Badge variant="warning" style={{ fontSize: 'var(--text-xs)' }}>{stats.pending}</Badge>
-                )}
-                {count !== undefined && count > 0 && !(v === 'approve' && stats.pending > 0 && !isActive) && (
-                  <span className="badge-count">{v === 'report' ? `${stats.proven}/${stats.total}` : count}</span>
-                )}
                 {v === 'chat' && isActive && <span className="dot-live" aria-hidden />}
               </Link>
             );
@@ -187,39 +176,20 @@ export function Sidebar({
                 ))}
                 {Object.keys(gates).length === 0 && <span className="small muted">No checks yet</span>}
               </div>
+              {criticals.length > 0 && (
+                <div className="small" style={{ marginTop: 'var(--space-2)', color: 'var(--red)' }}>
+                  {criticals.length} open problem{criticals.length !== 1 ? 's' : ''}
+                </div>
+              )}
             </Card>
           </Collapsible>
         </div>
       </nav>
 
       <div className="sidebar-bottom">
-        <Card className="proven-card">
-          <div className="proven-card-row">
-            <div className="proven-card-main">
-              <div className="k">Done</div>
-              <div className="v">{stats.proven} <span className="muted" style={{ fontWeight: 400 }}>/ {stats.total || '—'}</span></div>
-            </div>
-            <button
-              type="button"
-              className="proven-card-side"
-              onClick={onOpenProblems}
-              disabled={!criticals.length}
-              title={criticals.length ? 'View open problems' : undefined}
-            >
-              <div className="proven-pct" style={{ color: stats.pct === 100 ? 'var(--green)' : undefined }}>
-                {stats.pct}<span className="proven-pct-unit">%</span>
-              </div>
-              <div className="proven-side-meta" style={{ color: criticals.length ? 'var(--red)' : undefined }}>
-                {criticals.length ? `${criticals.length} problem${criticals.length !== 1 ? 's' : ''}` : 'All clear'}
-              </div>
-            </button>
-          </div>
-          <div className="proven-bar"><i style={{ width: `${stats.pct}%` }} /></div>
-        </Card>
         <div className="sidebar-meta">
           <span className="dot" aria-hidden />
           <span>Local only</span>
-          <span style={{ marginLeft: 'auto' }} className="mono">{stats.total} tasks</span>
         </div>
         {offlinePending > 0 && <Alert variant="warning" style={{ fontSize: 'var(--text-sm)', padding: 'var(--space-2)' }}>{offlinePending} action{offlinePending !== 1 && 's'} waiting to retry</Alert>}
         {error && <Alert variant="warning" style={{ fontSize: 'var(--text-sm)', padding: 'var(--space-2)' }}>{error}</Alert>}

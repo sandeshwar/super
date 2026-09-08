@@ -1,11 +1,10 @@
-"""Harness chat pipeline: task context + memory + grounding on every reply.
+"""Harness chat pipeline: memory + grounding on every reply.
 
-The model receives exactly one leaf card plus compiled memory claims and a
-repo overview — the harness holds the forest, the model holds one leaf.
-Replies pass symbol extraction and the grounding registry; chat warns via
-the returned gate verdict while the file write path blocks. Best-of-N
-sampling with verifier selection and early abort on stall multiplies small
-models (doc 02 §4): tokens buy search, selection buys quality.
+The model receives compiled memory claims and a repo overview. Replies pass
+symbol extraction and the grounding registry; chat warns via the returned
+gate verdict while the file write path blocks. Best-of-N sampling with
+verifier selection and early abort on stall multiplies small models
+(doc 02 §4): tokens buy search, selection buys quality.
 """
 
 from __future__ import annotations
@@ -34,10 +33,10 @@ def repo_overview(cfg: dict, limit: int = 60) -> str:
 
 
 def build_system(cfg: dict) -> str:
-    from . import memory, tasks
+    from . import memory
     from .tools.runtime import tools_system_addon
 
-    # Heartbeat: refresh agenda + auto-forge/seed before the model thinks.
+    # Heartbeat: refresh agenda + auto-forge before the model thinks.
     briefing = ""
     try:
         from . import intelligence as intel
@@ -47,17 +46,16 @@ def build_system(cfg: dict) -> str:
     except Exception:
         briefing = ""
 
-    leaf = tasks.leaf(cfg)
-    leaf_txt = tasks.render_leaf(leaf)
     try:
-        mem_txt = memory.compile_context(cfg, leaf)
+        mem_txt = memory.compile_context(cfg)
     except Exception:
         mem_txt = "(memory unavailable)"
     return (
         "You are SUPER — a self-extending intelligence: tools, memory, specialists, "
         "capability forge, and an autonomous agenda. You do not wait to be told what "
         "to improve. You notice gaps, invent missing skills, plan work, and act. "
-        "Match the user's language. Be direct; don't over-tool simple chat.\n\n"
+        "Always respond in English unless the user asks otherwise. "
+        "Be direct; don't over-tool simple chat.\n\n"
         "When you claim facts about this workspace (files, symbols, APIs, commands, configs): "
         "only state what you have evidence for from tools or the context below; "
         "prefer listed repo symbols over memory; put code symbols in backticks; "
@@ -65,12 +63,10 @@ def build_system(cfg: dict) -> str:
         "Autonomy loop (every substantive turn):\n"
         "1) Read the Intelligence agenda below — pursue high/critical items without being asked\n"
         "2) search_tools first; if a reusable combo is missing, propose_capability (risk=low)\n"
-        "3) add_task for real work with clear done-looks-like; prove nothing you cannot evidence\n"
-        "4) create_agent / run_agent for scoped specialists (children only tighten rights)\n"
-        "5) memory_add short durable claims; memory_confirm after verification\n"
-        "6) self_reflect when stuck; pursue_agenda / dismiss_agenda as you close gaps\n"
+        "3) create_agent / run_agent for scoped specialists (children only tighten rights)\n"
+        "4) memory_add short durable claims; memory_confirm after verification\n"
+        "5) self_reflect when stuck; pursue_agenda / dismiss_agenda as you close gaps\n"
         "Never invent tool names; never claim you can eval arbitrary code as a tool.\n\n"
-        f"Current task card (if any — not every turn is about this):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
         f"Working directory: {cfg.get('_root', '.')}\n"
         f"Top level: {repo_overview(cfg)}\n"
@@ -119,7 +115,7 @@ def _score_reply(cfg: dict, reply: str) -> tuple[float, dict]:
     if gate["checked"]:
         score = 1.0 if gate["ok"] else 0.0
     # Prefer replies sized within the competence envelope.
-    if len(reply.splitlines()) > cfg.get("envelope", {}).get("max_microtask_lines", 50) * 4:
+    if len(reply.splitlines()) > cfg.get("envelope", {}).get("max_reply_lines", 50) * 4:
         score -= 0.1
     return score, gate
 

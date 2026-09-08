@@ -1,4 +1,3 @@
-import type { TaskNode } from '../../types';
 import type { LlmStats } from '../../types';
 
 function fmtTps(n?: number) {
@@ -13,9 +12,8 @@ function fmtMs(n?: number) {
 }
 
 /** Single-line context + decode/prefill. Visibility controlled by side toggle. */
-export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open, busy }: {
+export function ContextBar({ tokenStats, messagesLen, cost, llmStats, open, busy }: {
   tokenStats: { total: number; limit: number | null; pct: number | null };
-  leaf: TaskNode | null;
   messagesLen: number;
   cost: { total: number } | null;
   llmStats?: LlmStats | null;
@@ -49,7 +47,6 @@ export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open
     parts.push(`~${tokenStats.total.toLocaleString()} tok est.`);
   }
   parts.push(`${messagesLen} msgs`);
-  if (leaf?.id) parts.push(`task ${leaf.id}`);
   if (cost) parts.push(`~${cost.total} tok`);
 
   return (

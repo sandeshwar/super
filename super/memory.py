@@ -3,8 +3,8 @@
 Memory is a cache, not ground truth: every claim carries source,
 verification state, validity interval, and taint. Disconfirming execution
 retires a claim the way a new docs version supersedes it (Event Evolution
-Graph supersession queries). The per-step compiler assembles only the
-load-bearing claims for the current leaf, keeping small contexts viable.
+Graph supersession queries). The per-step compiler assembles a small
+verified-first working set for the current turn.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from .errors import StoreError
 
 _FILE = "claims.json"
 _SCHEMA = 2
-TRUSTED_SOURCES = ("local-exec", "pinned-docs", "test", "human", "prove")
+TRUSTED_SOURCES = ("local-exec", "pinned-docs", "test", "human")
 _VER_STATES = ("unverified", "verified", "human", "retired", "superseded")
 # Tool results worth auto-caching as unverified claims (query + snippet).
 _AUTO_TOOLS = {
@@ -36,8 +36,14 @@ def _blank() -> dict:
     return {"schema": _SCHEMA, "next_id": 1, "claims": []}
 
 
+_CLAIM_KEYS = frozenset({
+    "id", "text", "source", "verification", "taint",
+    "valid_from", "valid_until", "superseded_by",
+})
+
+
 def _migrate(data: dict) -> dict:
-    """Ensure stable claim ids + next_id (schema 2)."""
+    """Ensure stable claim ids + next_id (schema 2); drop unknown claim fields."""
     if not isinstance(data, dict):
         data = _blank()
     claims = data.get("claims")
@@ -48,6 +54,9 @@ def _migrate(data: dict) -> dict:
     for c in claims:
         if not isinstance(c, dict):
             continue
+        for k in list(c.keys()):
+            if k not in _CLAIM_KEYS:
+                c.pop(k, None)
         if "id" not in c:
             c["id"] = next_id
             next_id += 1
@@ -121,7 +130,7 @@ def _resolve_index(data: dict, index: int | None = None, claim_id: int | None = 
 
 def remember(cfg: dict, text: str, source: str = "local-exec",
              taint: str = "local-exec", valid_until: str = "",
-             task_id: str = "", verification: str = "unverified",
+             verification: str = "unverified",
              *, dedupe: bool = True) -> dict:
     """Store one claim. Text is mandatory; sources are recorded verbatim.
 
@@ -140,8 +149,6 @@ def remember(cfg: dict, text: str, source: str = "local-exec",
             rank = {"unverified": 0, "verified": 1, "human": 2}
             if rank.get(verification, 0) > rank.get(str(dup.get("verification")), 0):
                 dup["verification"] = verification
-            if task_id and not dup.get("task_id"):
-                dup["task_id"] = task_id
             if source and source != dup.get("source"):
                 dup["source"] = source
             _save(cfg, data)
@@ -155,7 +162,6 @@ def remember(cfg: dict, text: str, source: str = "local-exec",
         "valid_from": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "valid_until": valid_until,
         "taint": taint,
-        "task_id": str(task_id or ""),
         "superseded_by": "",
     }
     data["claims"].append(claim)
@@ -180,7 +186,7 @@ def supersede(cfg: dict, index: int | None = None, replacement: str = "",
     """Retire claim, replaced by `replacement` (EEG supersession).
 
     If `replacement` is non-empty, also inserts it as a new live claim
-    (inherits task_id; verification=human when source was human-facing).
+    (verification=human when source was human-facing).
     """
     data = _load(cfg)
     i = _resolve_index(data, index, claim_id)
@@ -188,7 +194,6 @@ def supersede(cfg: dict, index: int | None = None, replacement: str = "",
     old_ver = str(old.get("verification") or "")
     old_source = str(old.get("source") or "human")
     old_taint = str(old.get("taint") or "local-exec")
-    old_task = str(old.get("task_id") or "")
     old_text = str(old.get("text") or "")
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     repl = (replacement or "").strip()
@@ -201,7 +206,6 @@ def supersede(cfg: dict, index: int | None = None, replacement: str = "",
             cfg, repl,
             source=old_source,
             taint=old_taint,
-            task_id=old_task,
             verification="human" if old_ver in ("human", "verified") else "unverified",
             dedupe=True,
         )
@@ -233,14 +237,12 @@ def list_claims(cfg: dict, *, include_dead: bool = False, limit: int = 200,
     return {"claims": slice_, "total": total, "offset": offset, "limit": limit}
 
 
-def search(cfg: dict, query: str = "", *, task_id: str = "", taint: str = "",
+def search(cfg: dict, query: str = "", *, taint: str = "",
            limit: int = 20, include_dead: bool = False) -> list[dict]:
     """Ranked claim retrieval: token overlap + substring + verification boost."""
     data = _load(cfg)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     pool = data["claims"] if include_dead else _live(data["claims"], now)
-    if task_id:
-        pool = [c for c in pool if c.get("task_id") == task_id]
     if taint:
         pool = [c for c in pool if c.get("taint") == taint]
     q = (query or "").strip()
@@ -272,30 +274,18 @@ def search(cfg: dict, query: str = "", *, task_id: str = "", taint: str = "",
     return [c for _, c in scored[:limit]]
 
 
-def compile_context(cfg: dict, task: dict | None, limit: int = 12) -> str:
-    """Per-step working set: verified-first live claims scoped to the leaf."""
+def compile_context(cfg: dict, limit: int = 12) -> str:
+    """Per-step working set: verified-first live claims."""
     data = _load(cfg)
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     live = _live(data["claims"], now)
-    tid = (task or {}).get("id", "")
-    title = (task or {}).get("title") or ""
 
     def rank(c: dict) -> tuple:
-        scoped = 0 if (tid and c.get("task_id") == tid) else 1
         ver = {"verified": 0, "human": 1, "unverified": 2}.get(c.get("verification", "unverified"), 3)
         trusted = 0 if c.get("source") in TRUSTED_SOURCES else 1
-        return (scoped, ver, trusted)
+        return (ver, trusted, -int(c.get("id") or 0))
 
-    if title:
-        hits = search(cfg, title, task_id=str(tid or ""), limit=limit)
-        if hits:
-            seen = {int(c.get("id") or -1) for c in hits}
-            rest = [c for c in sorted(live, key=rank) if int(c.get("id") or -1) not in seen]
-            live = hits + rest
-        else:
-            live.sort(key=rank)
-    else:
-        live.sort(key=rank)
+    live.sort(key=rank)
 
     lines = []
     for c in live[:limit]:
@@ -322,24 +312,6 @@ def retire_disconfirmed(cfg: dict, text_fragment: str) -> int:
     if n:
         _save(cfg, data)
     return n
-
-
-def remember_from_proof(cfg: dict, node: dict) -> dict | None:
-    """Auto-store a verified claim when a task is proven."""
-    if not node:
-        return None
-    tid = str(node.get("id") or "")
-    title = (node.get("title") or "").strip() or f"task {tid}"
-    proof = (node.get("proof") or "").strip()
-    text = f"Done: {title}" + (f" — proof: {proof}" if proof else "")
-    return remember(
-        cfg, text,
-        source="prove",
-        taint="local-exec",
-        task_id=tid,
-        verification="verified",
-        dedupe=True,
-    )
 
 
 def maybe_auto_from_tool(cfg: dict, name: str, arguments: dict, result: Any) -> dict | None:
@@ -387,31 +359,26 @@ def _sync_sqlite(cfg: dict, data: dict | None = None) -> bool:
             data = _load(cfg)
         con = sqlite3.connect(path)
         cur = con.cursor()
+        cur.execute("DROP TABLE IF EXISTS claims")
         cur.execute(
-            "CREATE TABLE IF NOT EXISTS claims ("
+            "CREATE TABLE claims ("
             "id INTEGER PRIMARY KEY, text TEXT, source TEXT, verification TEXT, "
-            "taint TEXT, task_id TEXT, valid_from TEXT, valid_until TEXT, superseded_by TEXT)"
+            "taint TEXT, valid_from TEXT, valid_until TEXT, superseded_by TEXT)"
         )
-        try:
-            cur.execute("ALTER TABLE claims ADD COLUMN superseded_by TEXT")
-        except sqlite3.OperationalError:
-            pass
-        cur.execute("DELETE FROM claims")
         for c in data.get("claims") or []:
             try:
                 cid = int(c.get("id"))
             except (TypeError, ValueError):
                 continue
             cur.execute(
-                "INSERT INTO claims (id, text, source, verification, taint, task_id, "
-                "valid_from, valid_until, superseded_by) VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO claims (id, text, source, verification, taint, "
+                "valid_from, valid_until, superseded_by) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     cid,
                     c.get("text", ""),
                     c.get("source", ""),
                     c.get("verification", ""),
                     c.get("taint", ""),
-                    c.get("task_id", ""),
                     c.get("valid_from", ""),
                     c.get("valid_until", ""),
                     c.get("superseded_by", ""),
@@ -428,9 +395,9 @@ def _ensure_sqlite(cfg: dict) -> bool:
     return _sync_sqlite(cfg)
 
 
-def query_graph(cfg: dict, task_id: str = "", taint: str = "", limit: int = 20) -> list[dict]:
-    """Graph query: live claims filtered by task_id/taint, ordered by trust."""
-    return search(cfg, "", task_id=task_id, taint=taint, limit=limit)
+def query_graph(cfg: dict, taint: str = "", limit: int = 20) -> list[dict]:
+    """Graph query: live claims filtered by taint, ordered by trust."""
+    return search(cfg, "", taint=taint, limit=limit)
 
 
 _TS_QUERIES = {

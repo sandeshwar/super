@@ -14,11 +14,11 @@ On session start compile: lockfile versions, lint/formatter configs, CI config, 
 
 ## 3. Verification ladder + mutation + property tests — reliability, vacuous tests, gaming
 
-Per edit: type/lint (local, ms). Per subtask: focused subset via test-impact analysis. Per commit: full suite + N-run flaky quarantine (nondeterministic failures never create fix-work). New acceptance tests face mutation (operator/boundary/statement deletes); green-under-mutation = vacuous = rejected as a check. Generated logic (parsers, authz, math) additionally gets property/fuzz harnesses — example tests are gameable, fuzzers aren't.
+Per edit: type/lint (local, ms). Per change-set: focused subset via test-impact analysis. Per commit: full suite + N-run flaky quarantine (nondeterministic failures never create fix-work). New acceptance tests face mutation (operator/boundary/statement deletes); green-under-mutation = vacuous = rejected as a check. Generated logic (parsers, authz, math) additionally gets property/fuzz harnesses — example tests are gameable, fuzzers aren't.
 
 ## 4. Spec pinning + drift probe — wrong-goal, slow drift (F2b)
 
-Task starts only after failing acceptance tests exist (ambiguity gate first: untestable intent → clarify). Per subtask, an isolated probe diffs the spec against the worker's actual diff/tool calls — never its self-report. Mismatch → ledger entry + re-plan, even when all local checks are green. Terminal evaluator diffs final diff vs. spec.
+Work starts only after failing acceptance tests exist (ambiguity gate first: untestable intent → clarify). Per change-set, an isolated probe diffs the acceptance check against the worker's actual diff/tool calls — never its self-report. Mismatch → ledger entry + re-plan, even when all local checks are green. Terminal evaluator diffs final diff vs. acceptance.
 
 ## 5. Quality budgets + debt ledger — bloat, maintainability, piling issues
 

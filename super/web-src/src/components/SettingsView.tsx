@@ -41,8 +41,6 @@ const GATE_META: Record<string, { label: string; desc: string }> = {
   duplication: { label: 'Duplication check', desc: 'Catch copy-paste that should be shared' },
   verification: { label: 'Verification', desc: 'Require tests or proof where expected' },
   mutation: { label: 'Mutation testing', desc: 'Check tests actually catch bugs' },
-  spec: { label: 'Spec match', desc: 'Keep work tied to pinned acceptance checks' },
-  drift: { label: 'Drift check', desc: 'Detect when code wanders from the plan' },
   quality: { label: 'Quality budgets', desc: 'Limit size and complexity of edits' },
   security: { label: 'Security checks', desc: 'Run security gates on changes' },
   taint: { label: 'Untrusted input labels', desc: 'Track data from the web or MCP as untrusted' },
@@ -58,7 +56,7 @@ const SECURITY_META: Record<string, { label: string; desc: string }> = {
 
 type PublicConfig = {
   llm: { endpoint: string; model: string; timeout_s: number; retries: number; health_path: string; think?: boolean | string };
-  envelope: { max_microtask_lines: number; best_of_n: number; max_steps_per_task: number; early_abort_stall: number };
+  envelope: { max_reply_lines: number; best_of_n: number; max_tool_steps: number; early_abort_stall: number };
   gates: Record<string, boolean>;
   security: Record<string, boolean>;
   mcp: { servers: McpServer[] };
@@ -625,7 +623,7 @@ function MemorySection({
         <CardHead>Add claim</CardHead>
         <CardBody>
           <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
-            Claims feed the agent&apos;s Verified context. Proven tasks and web/search tool hits auto-store;
+            Claims feed the agent&apos;s Verified context. Web/search tool hits auto-store;
             confirm anything you trust, supersede what&apos;s outdated.
           </p>
           <div style={{ display: 'flex', gap: 'var(--space-2)', maxWidth: 640 }}>
@@ -671,7 +669,7 @@ function MemorySection({
           </div>
           {visibleClaims.length === 0 && (
             <p className="small muted">
-              {showAll ? 'No claims yet — prove a task, run a web search, or add one above.' : 'Nothing waiting — chat cards handle confirms as they appear.'}
+              {showAll ? 'No claims yet — run a web search, or add one above.' : 'Nothing waiting — chat cards handle confirms as they appear.'}
             </p>
           )}
           <div className="col-stack">
@@ -682,7 +680,6 @@ function MemorySection({
                   <div className="small muted mono" style={{ marginTop: 4 }}>
                     #{c.id} · {c.verification} · {c.source}
                     {c.taint ? ` · taint:${c.taint}` : ''}
-                    {c.task_id ? ` · task:${c.task_id}` : ''}
                     {c.valid_from ? ` · ${c.valid_from}` : ''}
                   </div>
                   {replaceId === c.id && (
@@ -813,7 +810,7 @@ function AgentsSection({
         </CardHead>
         <CardBody>
           <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
-            Harness audits gaps every chat turn and auto-acts safe fixes (forge recipes, seed tasks/memory).
+            Harness audits gaps every chat turn and auto-acts safe fixes (forge recipes, seed memory).
             High/critical items are injected into the model prompt so it pursues them without being asked.
           </p>
           {agenda.length === 0 && <p className="small muted">Agenda clear — hit Reflect now or chat to refresh.</p>}
@@ -1396,7 +1393,7 @@ function ToolsSection({
       <Card>
         <CardHead><h3>Chat helpers</h3></CardHead>
         <CardBody className="stack gap-sm">
-          <Switch id="pref-slash" checked={toolPrefs.slashCommands} onChange={(v) => onToolPref({ slashCommands: v })} label="Slash commands" description="Type / to insert shortcuts like /add-task" />
+          <Switch id="pref-slash" checked={toolPrefs.slashCommands} onChange={(v) => onToolPref({ slashCommands: v })} label="Slash commands" description="Type / to insert shortcuts like /clear" />
           <Switch id="pref-mention" checked={toolPrefs.fileMentions} onChange={(v) => onToolPref({ fileMentions: v })} label="@ file mentions" description="Type @ to attach file paths" />
           <Switch id="pref-attach" checked={toolPrefs.attachFiles} onChange={(v) => onToolPref({ attachFiles: v })} label="File attach button" description="Show the paperclip next to the composer" />
           <Switch id="pref-hints" checked={toolPrefs.showShortcuts} onChange={(v) => onToolPref({ showShortcuts: v })} label="Shortcut hints" description="Show Enter / Shift+Enter tips under the composer" />
@@ -1430,11 +1427,11 @@ function ToolsSection({
             </div>
             <div className="settings-field">
               <label htmlFor="max-steps">Max tool steps per turn</label>
-              <Input id="max-steps" type="number" min={1} max={200} value={envDraft.max_steps_per_task} onChange={(e) => setEnvDraft({ ...envDraft, max_steps_per_task: Number(e.target.value) || 1 })} />
+              <Input id="max-steps" type="number" min={1} max={200} value={envDraft.max_tool_steps} onChange={(e) => setEnvDraft({ ...envDraft, max_tool_steps: Number(e.target.value) || 1 })} />
             </div>
             <div className="settings-field">
-              <label htmlFor="max-lines">Max lines per micro-task</label>
-              <Input id="max-lines" type="number" min={1} max={1000} value={envDraft.max_microtask_lines} onChange={(e) => setEnvDraft({ ...envDraft, max_microtask_lines: Number(e.target.value) || 1 })} />
+              <label htmlFor="max-lines">Max lines per reply</label>
+              <Input id="max-lines" type="number" min={1} max={1000} value={envDraft.max_reply_lines} onChange={(e) => setEnvDraft({ ...envDraft, max_reply_lines: Number(e.target.value) || 1 })} />
             </div>
             <div className="settings-field">
               <label htmlFor="stall">Stop after stalled tries</label>

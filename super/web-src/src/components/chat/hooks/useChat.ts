@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamChat } from '../../../api';
-import type { ApprovalRequest, ChatBlock, ChatMessage, ChildSpan, GateInfo, LlmStats, MediaPart, SessionSummary, TaskNode, ToolEvent, CanvasPart } from '../../../types';
+import type { ApprovalRequest, ChatBlock, ChatMessage, ChildSpan, GateInfo, LlmStats, MediaPart, SessionSummary, ToolEvent, CanvasPart } from '../../../types';
 import { mergeMedia } from '../MediaAlbum';
 import { mergeCanvas } from '../CanvasPanel';
 
@@ -36,9 +36,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const [sessionLoading, setSessionLoading] = useState(() => Boolean(opts.sessionId));
   const [filter, setFilter] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
-  const [leaf, setLeaf] = useState<TaskNode | null>(null);
-  const [leafRendered, setLeafRendered] = useState('');
-  const [mentionPaths, setMentionPaths] = useState<string[]>([]);
+  const [mentionPaths] = useState<string[]>([]);
   const [showSlash, setShowSlash] = useState(false);
   const [slashFilter, setSlashFilter] = useState('');
   const [showMention, setShowMention] = useState(false);
@@ -66,6 +64,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
   /** Local stream start — used so heal doesn't kill a send before `generating` flips. */
   const streamStartedAtRef = useRef(0);
   const sawGeneratingRef = useRef(false);
+  const activeIdRef = useRef<string | null>(activeId);
+  activeIdRef.current = activeId;
+  /** After this, idle server + open local stream ⇒ take disk truth (new-chat race). */
+  const HEAL_GRACE_MS = 12_000;
 
   /** True when an in-tab SSE should be abandoned for disk truth. */
   const shouldHealLocalStream = useCallback((generating: boolean) => {
@@ -74,9 +76,11 @@ export function useChat(opts: ChatRouteOpts = {}) {
       sawGeneratingRef.current = true;
       return false;
     }
-    // Only heal after we observed the run start then finish. Never time out a
-    // still-starting POST (Max think / cold model can sit >8s before register).
-    return sawGeneratingRef.current;
+    if (sawGeneratingRef.current) return true;
+    // Never observed generating (new chat before session bind, or finished <2s).
+    // After grace, trust disk — otherwise Stop sticks forever on hung SSE.
+    const started = streamStartedAtRef.current;
+    return started > 0 && Date.now() - started >= HEAL_GRACE_MS;
   }, []);
 
   const loadSessions = useCallback(async () => {
@@ -90,38 +94,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
     }
   }, []);
 
-  const loadLeaf = useCallback(async () => {
-    try {
-      const r = await api.leaf();
-      setLeaf(r.leaf);
-      setLeafRendered(r.rendered);
-    } catch { /* leaf optional */ }
-  }, []);
-
-  const loadMentionPaths = useCallback(async () => {
-    try {
-      const { tasks } = await api.tree();
-      const seen = new Set<string>();
-      const out: string[] = [];
-      for (const t of tasks) {
-        for (const f of t.files || []) {
-          const p = String(f).trim();
-          if (!p || seen.has(p)) continue;
-          seen.add(p);
-          out.push(p);
-          if (out.length >= 80) break;
-        }
-        if (out.length >= 80) break;
-      }
-      setMentionPaths(out);
-    } catch { /* optional */ }
-  }, []);
-
-  useEffect(() => { void loadSessions(); void loadLeaf(); void loadMentionPaths(); }, [loadSessions, loadLeaf, loadMentionPaths]);
-  useEffect(() => {
-    const id = window.setInterval(() => { void loadLeaf(); }, 8000);
-    return () => window.clearInterval(id);
-  }, [loadLeaf]);
+  useEffect(() => { void loadSessions(); }, [loadSessions]);
 
   useEffect(() => {
     if (!activeId) {
@@ -231,9 +204,27 @@ export function useChat(opts: ChatRouteOpts = {}) {
 
   // While Stop is showing, keep polling — heals hung SSE after server already finished.
   useEffect(() => {
-    if (!busy || !activeId) return;
+    if (!busy) return;
     const tick = () => {
-      void api.session(activeId)
+      const sid = activeIdRef.current;
+      if (!sid) {
+        // New chat: discover the in-flight (or just-finished) session so heal can sync.
+        void api.sessions()
+          .then(({ sessions: list }) => {
+            const gen = list.find((s) => s.generating);
+            if (gen) {
+              sawGeneratingRef.current = true;
+              setActiveId(gen.id);
+              return;
+            }
+            if (!shouldHealLocalStream(false)) return;
+            const newest = list[0];
+            if (newest && newest.n >= 1) setActiveId(newest.id);
+          })
+          .catch(() => { /* ignore */ });
+        return;
+      }
+      void api.session(sid)
         .then((s) => {
           const gen = Boolean(s.generating);
           if (gen) {
@@ -262,7 +253,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       window.clearTimeout(first);
       window.clearInterval(id);
     };
-  }, [busy, activeId, shouldHealLocalStream]);
+  }, [busy, activeId, setActiveId, shouldHealLocalStream]);
 
   useEffect(() => {
     const el = bottomRef.current?.closest('.message-list');
@@ -321,14 +312,14 @@ export function useChat(opts: ChatRouteOpts = {}) {
   }, [agentView, setActiveId]);
 
   const tokenStats = useMemo(() => {
-    const chars = messages.reduce((a, m) => a + m.content.length, 0) + (leafRendered?.length || 0);
+    const chars = messages.reduce((a, m) => a + m.content.length, 0);
     const prompt = Math.ceil(chars / 4);
     const completion = messages.filter((m) => m.role === 'assistant').reduce((a, m) => a + Math.ceil(m.content.length / 4), 0);
     const total = prompt + completion;
     const limit = typeof opts.contextLength === 'number' && opts.contextLength > 0 ? opts.contextLength : null;
     const pct = limit ? Math.min(100, Math.round((total / limit) * 100)) : null;
     return { prompt, completion, total, limit, pct };
-  }, [messages, leafRendered, opts.contextLength]);
+  }, [messages, opts.contextLength]);
 
   const systemNote = useCallback((content: string) => {
     setMessages((m) => [...m, { role: 'assistant', content, ts: new Date().toISOString() }]);
@@ -342,51 +333,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
       return;
     }
     if (text.startsWith('/')) {
-      const [cmd, ...rest] = text.split(/\s+/);
+      const [cmd] = text.split(/\s+/);
       if (cmd === '/clear') { setMessages([]); setInput(''); return; }
       if (cmd === '/export') {
         const md = messages.map((m) => `**${m.role}**: ${m.content}`).join('\n\n');
         const blob = new Blob([`# ${activeMeta?.title || 'Chat'}\n\n${md}`], { type: 'text/markdown' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a'); a.href = url; a.download = `${activeMeta?.title || 'chat'}.md`; a.click(); URL.revokeObjectURL(url);
-        setInput('');
-        return;
-      }
-      if (cmd === '/add-task') {
-        const title = rest.join(' ').replace(/--done.*/, '').trim() || 'Untitled';
-        try {
-          const r = await api.addTask(title);
-          systemNote(`Added task #${r.id}: ${title}`);
-          window.dispatchEvent(new Event('super-refresh'));
-        } catch (e) {
-          systemNote(`Could not add task: ${userMessage(e)}`);
-        }
-        setInput('');
-        return;
-      }
-      if (cmd === '/spec-pin') {
-        const [id, ...acc] = rest;
-        if (!id) { systemNote('Usage: /spec-pin <task-id> <acceptance…>'); setInput(''); return; }
-        try {
-          await api.pinSpec(id, acc.length ? acc : ['done']);
-          systemNote(`Pinned checks for ${id}: ${acc.length || 1} item(s)`);
-        } catch (e) {
-          systemNote(`Spec pin failed: ${userMessage(e)}`);
-        }
-        setInput('');
-        return;
-      }
-      if (cmd === '/prove') {
-        const [id, ...proofParts] = rest;
-        const proof = proofParts.join(' ').trim();
-        if (!id || !proof) { systemNote('Usage: /prove <task-id> <proof note>'); setInput(''); return; }
-        try {
-          await api.prove(id, proof);
-          systemNote(`Proof attached to ${id}.`);
-          window.dispatchEvent(new Event('super-refresh'));
-        } catch (e) {
-          systemNote(`Prove failed: ${userMessage(e)}`);
-        }
         setInput('');
         return;
       }
@@ -554,6 +507,11 @@ export function useChat(opts: ChatRouteOpts = {}) {
         skipUserAppend: sendOpts.skipUserAppend,
         onEvent: (ev) => {
           if (ac.signal.aborted) return;
+          const boundSid = typeof ev.session_id === 'string' ? ev.session_id.trim() : '';
+          if (boundSid && !activeIdRef.current) {
+            setActiveId(boundSid);
+            activeIdRef.current = boundSid;
+          }
           const td = ev.thinking_delta;
           if (typeof td === 'string' && td) {
             const step = typeof ev.step === 'number' ? ev.step : Math.max(0, thinkStep);
@@ -731,11 +689,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
         abortRef.current = null;
       }
       void loadSessions();
-      void loadLeaf();
       setCost({
-        prompt: Math.ceil((startChars + (leafRendered?.length || 0)) / 4),
+        prompt: Math.ceil(startChars / 4),
         completion: Math.ceil(acc.length / 4),
-        total: Math.ceil((startChars + acc.length + (leafRendered?.length || 0)) / 4),
+        total: Math.ceil((startChars + acc.length) / 4),
       });
     } catch (e) {
       if (sendGenRef.current !== runId) {
@@ -787,7 +744,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       }
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [input, activeId, agentView, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
+  }, [input, activeId, agentView, loadSessions, activeMeta, messages, setActiveId, systemNote]);
 
   const stop = useCallback(() => {
     const sid = activeId;
@@ -894,12 +851,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
   useEffect(() => {
     const onRefresh = () => {
       void loadSessions();
-      void loadLeaf();
-      void loadMentionPaths();
     };
     window.addEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
     return () => window.removeEventListener('super-refresh' as unknown as string, onRefresh as EventListener);
-  }, [loadSessions, loadLeaf, loadMentionPaths]);
+  }, [loadSessions]);
 
   const deleteChat = useCallback(async (id: string) => {
     try {
@@ -999,7 +954,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
   return {
     sessions, filtered, activeId, setActiveId, messages, input, setInput, busy, error, setError, filter, setFilter,
     sessionLoading,
-    isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
+    isRenaming, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
     llmStats,
@@ -1007,7 +962,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
     parentId: agentView?.parentId ?? null,
     activeSpanId: agentView?.spanId ?? null,
     selectSession, selectSpan, backToParent,
-    loadSessions, loadLeaf, send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
+    loadSessions, send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention, patchApprovals,
   };
 }

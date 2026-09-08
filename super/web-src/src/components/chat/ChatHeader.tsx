@@ -124,7 +124,7 @@ export function ChatHeader({
           <span className="truncate">
             {agentView
               ? 'Sub-agent transcript · click parent chat to continue'
-              : (messages.length ? `${messages.length} messages` : 'Uses the current task and saved memory')}
+              : (messages.length ? `${messages.length} messages` : 'Uses tools and saved memory')}
           </span>
         </div>
       </div>
