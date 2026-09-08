@@ -46,7 +46,7 @@ RESERVED_PREFIXES = ("lc_", "crewai_", "system_")
 
 SIDE_EFFECT_TOOLS = frozenset({
     "write_file", "edit_file", "delete_path", "mkdir",
-    "file_delete", "copy_file", "lc_copy_file", "move_file",
+    "file_delete", "copy_file", "move_file",
     "run_command", "fetch_url",
 })
 BLOCKED_HEADER_KEYS = frozenset({

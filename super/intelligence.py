@@ -405,7 +405,7 @@ def _scan_config(cfg: dict) -> list[dict]:
             "key": "tools_off",
         })
     if not groups.get("web", False) and not any(
-        (tools.get("packs") or {}).get(p) for p in ("lc_search", "lc_tavily", "lc_wikipedia")
+        (tools.get("packs") or {}).get(p) for p in ("lc_search", "lc_wikipedia", "lc_arxiv")
     ):
         out.append({
             "kind": "config", "priority": "low",

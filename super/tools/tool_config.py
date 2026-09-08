@@ -46,14 +46,8 @@ def _f(
 # ── Pack field schemas (referenced by pack id) ─────────────────────────
 
 PACK_FIELDS: dict[str, list[Field]] = {
-    "lc_http": [
-        _f("timeout_s", "Timeout (s)", type="number", default=15, desc="HTTP request timeout"),
-        _f("headers_json", "Extra headers (JSON)", type="json", default="{}", placeholder='{"Authorization":"Bearer …"}'),
-    ],
     "lc_search": [
-        _f("max_results", "Max results", type="number", default=5),
-        _f("tavily_api_key", "Tavily API key", type="secret", env="TAVILY_API_KEY", desc="Optional — enables Tavily search"),
-        _f("serper_api_key", "Serper API key", type="secret", env="SERPER_API_KEY", desc="Optional — Google via Serper"),
+        _f("max_results", "Max results", type="number", default=5, desc="Hint for search result count (DuckDuckGo)"),
     ],
     "lc_arxiv": [
         _f("max_results", "Max papers", type="number", default=3),
@@ -66,22 +60,8 @@ PACK_FIELDS: dict[str, list[Field]] = {
     "lc_python": [
         _f("timeout_s", "REPL timeout (s)", type="number", default=30),
     ],
-    "lc_shell": [
-        _f("timeout_s", "Command timeout (s)", type="number", default=60),
-    ],
-    "lc_files": [
-        _f("root_dir", "Root directory", type="string", default="", placeholder="(workspace)", desc="Leave empty for workspace root"),
-    ],
     "lc_human": [
         _f("prompt_prefix", "Prompt prefix", type="string", default="Operator input needed: "),
-    ],
-    "crewai_stdlib": [
-        _f("root_dir", "Root directory", type="string", default="", placeholder="(workspace)"),
-    ],
-    "lc_tavily": [
-        _f("api_key", "Tavily API key", type="secret", required=True, env="TAVILY_API_KEY"),
-        _f("max_results", "Max results", type="number", default=5),
-        _f("search_depth", "Search depth", type="string", default="basic", placeholder="basic | advanced"),
     ],
     "lc_github": [
         _f("github_token", "GitHub token", type="secret", required=True, env="GITHUB_TOKEN", desc="PAT for repo/issues tools"),

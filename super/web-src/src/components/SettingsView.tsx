@@ -1170,7 +1170,7 @@ function ToolsSection({
             External ecosystems plug in as packs. Enable a pack here (or let the agent call{' '}
             <code className="mono">load_tool_pack</code>) — schemas stay out of context until loaded.
             Install with <code className="mono">pip install -e &quot;.[agent]&quot;</code>
-            {` `}(+ <code className="mono">.[crewai]</code> for CrewAI).
+            {` `}(+ <code className="mono">.[crewai]</code> to register custom CrewAI tools).
           </p>
           {packs.length === 0 && (
             <div className="empty" style={{ padding: 'var(--space-3)' }}>

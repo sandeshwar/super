@@ -61,18 +61,9 @@ def status() -> dict[str, bool]:
 # Each pack: id, title, blurb, group, risk, default, factory key
 
 PACKS: dict[str, dict[str, Any]] = {
-    "lc_http": {
-        "title": "HTTP requests",
-        "blurb": "GET/POST via LangChain requests tools",
-        "group": "lc_http",
-        "risk": "medium",
-        "default": False,
-        "requires": ["langchain_community"],
-        "factory": "http",
-    },
     "lc_search": {
         "title": "Web search",
-        "blurb": "DuckDuckGo + Wikipedia (LangChain)",
+        "blurb": "DuckDuckGo web search (LangChain)",
         "group": "lc_search",
         "risk": "medium",
         "default": False,
@@ -90,7 +81,7 @@ PACKS: dict[str, dict[str, Any]] = {
     },
     "lc_wikipedia": {
         "title": "Wikipedia",
-        "blurb": "Wikipedia query tool",
+        "blurb": "Wikipedia query tool (lang / depth configurable)",
         "group": "lc_research",
         "risk": "low",
         "default": False,
@@ -106,24 +97,6 @@ PACKS: dict[str, dict[str, Any]] = {
         "requires": ["langchain_experimental"],
         "factory": "python",
     },
-    "lc_shell": {
-        "title": "Shell (LangChain)",
-        "blurb": "LangChain ShellTool — prefer built-in run_command when possible",
-        "group": "lc_code",
-        "risk": "high",
-        "default": False,
-        "requires": ["langchain_community"],
-        "factory": "shell",
-    },
-    "lc_files": {
-        "title": "File management toolkit",
-        "blurb": "LangChain FileManagementToolkit over the workspace",
-        "group": "lc_files",
-        "risk": "high",
-        "default": False,
-        "requires": ["langchain_community"],
-        "factory": "files",
-    },
     "lc_human": {
         "title": "Human input",
         "blurb": "Pause for operator input (HumanInputTool)",
@@ -132,15 +105,6 @@ PACKS: dict[str, dict[str, Any]] = {
         "default": False,
         "requires": ["langchain_community"],
         "factory": "human",
-    },
-    "lc_tavily": {
-        "title": "Tavily search",
-        "blurb": "Paid web search — needs API key in pack config",
-        "group": "lc_search",
-        "risk": "medium",
-        "default": False,
-        "requires": ["langchain_community"],
-        "factory": "tavily",
     },
     "lc_github": {
         "title": "GitHub",
@@ -151,46 +115,21 @@ PACKS: dict[str, dict[str, Any]] = {
         "requires": ["langchain_community"],
         "factory": "github",
     },
-    "crewai_stdlib": {
-        "title": "CrewAI stdlib tools",
-        "blurb": "FileRead/FileWriter/Directory when CrewAI is installed",
-        "group": "crewai",
-        "risk": "high",
-        "default": False,
-        "requires": ["crewai"],
-        "factory": "crewai_stdlib",
-    },
 }
 
 GROUP_META: dict[str, dict[str, str]] = {
-    "lc_http": {"title": "LangChain · HTTP", "blurb": "Requests tools from langchain-community"},
-    "lc_search": {"title": "LangChain · Search", "blurb": "Web search integrations"},
+    "lc_search": {"title": "LangChain · Search", "blurb": "DuckDuckGo web search"},
     "lc_research": {"title": "LangChain · Research", "blurb": "Papers and encyclopedic lookup"},
-    "lc_code": {"title": "LangChain · Code", "blurb": "REPL and shell (high risk)"},
-    "lc_files": {"title": "LangChain · Files", "blurb": "FileManagementToolkit"},
+    "lc_code": {"title": "LangChain · Code", "blurb": "Python REPL (high risk)"},
     "lc_human": {"title": "LangChain · Human", "blurb": "Operator-in-the-loop"},
     "lc_github": {"title": "LangChain · GitHub", "blurb": "GitHub API tools"},
-    "crewai": {"title": "CrewAI", "blurb": "CrewAI built-in tools"},
+    "crewai": {"title": "CrewAI", "blurb": "User-registered CrewAI tools"},
     "lc_custom": {"title": "LangChain · Custom", "blurb": "User-registered LC/CrewAI tools"},
 }
 
 # Expected tools per pack — registered as searchable stubs before heavy imports.
 # Names must match what wrap_tool / load_pack will register (incl. lc_ prefix on collisions).
 PACK_TOOLS: dict[str, list[dict[str, str]]] = {
-    "lc_http": [
-        {
-            "name": "requests_get",
-            "summary": "HTTP GET via LangChain",
-            "description": "Perform an HTTP GET request. Returns response text (untrusted).",
-            "keywords": "http web fetch url get request api",
-        },
-        {
-            "name": "requests_post",
-            "summary": "HTTP POST via LangChain",
-            "description": "Perform an HTTP POST request. Returns response text (untrusted).",
-            "keywords": "http web post request api",
-        },
-    ],
     "lc_search": [
         {
             "name": "duckduckgo_search",
@@ -200,12 +139,6 @@ PACK_TOOLS: dict[str, list[dict[str, str]]] = {
                 "and questions that need up-to-date information. Input is a search query."
             ),
             "keywords": "web search internet duckduckgo google news current events browse online",
-        },
-        {
-            "name": "wikipedia",
-            "summary": "Wikipedia lookup",
-            "description": "Query Wikipedia for an encyclopedic summary of a topic.",
-            "keywords": "wikipedia encyclopedia wiki research lookup",
         },
     ],
     "lc_arxiv": [
@@ -232,23 +165,6 @@ PACK_TOOLS: dict[str, list[dict[str, str]]] = {
             "keywords": "python repl code execute eval",
         },
     ],
-    "lc_shell": [
-        {
-            "name": "terminal",
-            "summary": "LangChain shell tool",
-            "description": "Run shell commands via LangChain ShellTool. Prefer built-in run_command when possible.",
-            "keywords": "shell terminal bash command",
-        },
-    ],
-    "lc_files": [
-        {"name": "lc_copy_file", "summary": "Copy a file", "description": "Copy a file within the pack root.", "keywords": "file copy"},
-        {"name": "lc_file_delete", "summary": "Delete a file", "description": "Delete a file within the pack root.", "keywords": "file delete"},
-        {"name": "lc_file_search", "summary": "Search files", "description": "Search files within the pack root.", "keywords": "file search"},
-        {"name": "lc_move_file", "summary": "Move a file", "description": "Move/rename a file within the pack root.", "keywords": "file move rename"},
-        {"name": "lc_read_file", "summary": "Read a file (LC)", "description": "Read a file via LangChain FileManagementToolkit.", "keywords": "file read"},
-        {"name": "lc_write_file", "summary": "Write a file (LC)", "description": "Write a file via LangChain FileManagementToolkit.", "keywords": "file write"},
-        {"name": "list_directory", "summary": "List directory (LC)", "description": "List a directory via LangChain FileManagementToolkit.", "keywords": "directory list ls"},
-    ],
     "lc_human": [
         {
             "name": "human",
@@ -256,19 +172,6 @@ PACK_TOOLS: dict[str, list[dict[str, str]]] = {
             "description": "Pause and request input from the human operator.",
             "keywords": "human input operator ask",
         },
-    ],
-    "lc_tavily": [
-        {
-            "name": "tavily_search_results_json",
-            "summary": "Tavily web search",
-            "description": "Paid Tavily web search. Requires API key in pack config.",
-            "keywords": "web search tavily internet news",
-        },
-    ],
-    "crewai_stdlib": [
-        {"name": "Read_File", "summary": "CrewAI file read", "description": "Read a file via CrewAI tools.", "keywords": "file read crewai"},
-        {"name": "File_Writer", "summary": "CrewAI file write", "description": "Write a file via CrewAI tools.", "keywords": "file write crewai"},
-        {"name": "Directory_Read", "summary": "CrewAI directory read", "description": "List a directory via CrewAI tools.", "keywords": "directory list crewai"},
     ],
 }
 
@@ -533,7 +436,7 @@ def wrap_tool(tool: Any, *, group: str, risk: str = "medium", name: str | None =
     def handler(cfg: dict, args: dict) -> ToolResult:
         try:
             out = _run_lc_tool(tool, args)
-            taint = "untrusted" if group.startswith("lc_search") or group == "lc_http" else "local-exec"
+            taint = "untrusted" if group.startswith("lc_search") or group == "lc_research" else "local-exec"
             return ToolResult(True, str(out), taint=taint)
         except Exception as e:
             return ToolResult(False, str(e))
@@ -578,52 +481,13 @@ def _pc(cfg: dict, pack_id: str) -> dict:
     return resolve_pack(cfg, pack_id)
 
 
-def _factory_http(cfg: dict) -> list[Any]:
-    from langchain_community.tools import RequestsGetTool, RequestsPostTool
-    from langchain_community.utilities import TextRequestsWrapper
-    pc = _pc(cfg, "lc_http")
-    headers = {}
-    raw = pc.get("headers_json") or "{}"
-    if isinstance(raw, str) and raw.strip():
-        try:
-            headers = json.loads(raw)
-        except json.JSONDecodeError:
-            headers = {}
-    wrapper = TextRequestsWrapper(headers=headers or None)
-    return [
-        RequestsGetTool(requests_wrapper=wrapper, allow_dangerous_requests=True),
-        RequestsPostTool(requests_wrapper=wrapper, allow_dangerous_requests=True),
-    ]
-
-
 def _factory_search(cfg: dict) -> list[Any]:
     tools = []
-    pc = _pc(cfg, "lc_search")
-    max_results = int(pc.get("max_results") or 5)
     try:
         from langchain_community.tools import DuckDuckGoSearchRun
         tools.append(DuckDuckGoSearchRun())
     except Exception as e:
         log.debug("DuckDuckGo unavailable: %s", e)
-    if pc.get("tavily_api_key"):
-        try:
-            from langchain_community.tools.tavily_search import TavilySearchResults
-            tools.append(TavilySearchResults(api_key=pc["tavily_api_key"], max_results=max_results))
-        except Exception as e:
-            log.debug("Tavily via search pack unavailable: %s", e)
-    if pc.get("serper_api_key"):
-        try:
-            from langchain_community.utilities import GoogleSerperAPIWrapper
-            from langchain_community.tools import GoogleSerperRun
-            tools.append(GoogleSerperRun(api_wrapper=GoogleSerperAPIWrapper(serper_api_key=pc["serper_api_key"])))
-        except Exception as e:
-            log.debug("Serper unavailable: %s", e)
-    try:
-        from langchain_community.tools import WikipediaQueryRun
-        from langchain_community.utilities import WikipediaAPIWrapper
-        tools.append(WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper(top_k_results=max_results)))
-    except Exception as e:
-        log.debug("Wikipedia unavailable: %s", e)
     return tools
 
 
@@ -652,35 +516,9 @@ def _factory_python(cfg: dict) -> list[Any]:
     return [PythonREPLTool()]
 
 
-def _factory_shell(cfg: dict) -> list[Any]:
-    from langchain_community.tools import ShellTool
-    return [ShellTool()]
-
-
-def _factory_files(cfg: dict) -> list[Any]:
-    from langchain_community.agent_toolkits import FileManagementToolkit
-    pc = _pc(cfg, "lc_files")
-    root = (pc.get("root_dir") or "").strip() or (cfg.get("_root") or ".")
-    tk = FileManagementToolkit(root_dir=root)
-    return list(tk.get_tools())
-
-
 def _factory_human(cfg: dict) -> list[Any]:
     from langchain_community.tools import HumanInputRun
     return [HumanInputRun()]
-
-
-def _factory_tavily(cfg: dict) -> list[Any]:
-    from langchain_community.tools.tavily_search import TavilySearchResults
-    pc = _pc(cfg, "lc_tavily")
-    key = pc.get("api_key")
-    if not key:
-        raise RuntimeError("lc_tavily requires api_key in Settings → pack config (or TAVILY_API_KEY)")
-    return [TavilySearchResults(
-        api_key=key,
-        max_results=int(pc.get("max_results") or 5),
-        search_depth=str(pc.get("search_depth") or "basic"),
-    )]
 
 
 def _factory_github(cfg: dict) -> list[Any]:
@@ -699,38 +537,13 @@ def _factory_github(cfg: dict) -> list[Any]:
         raise RuntimeError(f"GitHub toolkit failed: {e}") from e
 
 
-def _factory_crewai_stdlib(cfg: dict) -> list[Any]:
-    tools = []
-    pc = _pc(cfg, "crewai_stdlib")
-    root = (pc.get("root_dir") or "").strip() or (cfg.get("_root") or ".")
-    try:
-        from crewai_tools import FileReadTool, FileWriterTool, DirectoryReadTool
-        tools.extend([
-            FileReadTool(),
-            FileWriterTool(),
-            DirectoryReadTool(directory=root) if True else DirectoryReadTool(),
-        ])
-    except ImportError:
-        try:
-            from crewai.tools import FileReadTool  # type: ignore
-            tools.append(FileReadTool())
-        except Exception as e:
-            log.debug("CrewAI tools unavailable: %s", e)
-    return tools
-
-
 _FACTORIES: dict[str, Callable[[dict], list[Any]]] = {
-    "http": _factory_http,
     "search": _factory_search,
     "arxiv": _factory_arxiv,
     "wikipedia": _factory_wikipedia,
     "python": _factory_python,
-    "shell": _factory_shell,
-    "files": _factory_files,
     "human": _factory_human,
-    "tavily": _factory_tavily,
     "github": _factory_github,
-    "crewai_stdlib": _factory_crewai_stdlib,
 }
 
 
@@ -836,6 +649,11 @@ def ensure_bridge(cfg: dict) -> None:
     register_lazy_stubs(cfg)
     sync_enabled_packs(cfg)
     try:
+        from .mcp_bridge import ensure_mcp
+        ensure_mcp(cfg)
+    except Exception:
+        pass
+    try:
         from .. import capabilities as _caps
         _caps.ensure_capabilities(cfg)
     except Exception:
@@ -893,7 +711,7 @@ def _register_pack_meta_tools() -> None:
             "activation loads the pack automatically."
         ),
         parameters=_props_pack(
-            pack_id={"type": "string", "description": "Pack id, e.g. lc_search or crewai_stdlib", "_req": True}
+            pack_id={"type": "string", "description": "Pack id, e.g. lc_search or lc_wikipedia", "_req": True}
         ),
         handler=handle_load_pack,
         discovery=True,
