@@ -181,7 +181,6 @@ export function ChatDock({
         <span className="chat-dock-meta-right">
           <Button size="sm" variant="ghost" onClick={onShare} title="Export chat" disabled={!messagesLen}>Export</Button>
           <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)' }}>{messagesLen} msgs</Badge>
-          {busy && <Badge variant="accent" style={{ fontSize: 'var(--text-2xs)' }}>writing…</Badge>}
           {cost && <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)' }}>~{cost.total} tok</Badge>}
         </span>
       </div>

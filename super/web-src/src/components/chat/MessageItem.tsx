@@ -20,13 +20,14 @@ type Props = {
   onBranch: (idx: number) => void;
   onRegenerate: (idx: number) => void;
   onStop: () => void;
+  onApprovalsChange?: (idx: number, approvals: import('../../types').ApprovalRequest[]) => void;
 };
 
 function msgKey(message: ChatMessage, index: number): string {
-  return `${message.role}-${message.ts || 't'}-${index}-${(message.content || '').slice(0, 24)}`;
+  return `${message.role}-${message.ts || 't'}-${index}`;
 }
 
-export function MessageItem({ message, index, busy, isLast, editingIdx, editDraft, setEditDraft, setEditingIdx, onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop }: Props) {
+export function MessageItem({ message, index, busy, isLast, editingIdx, editDraft, setEditDraft, setEditingIdx, onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop, onApprovalsChange }: Props) {
   const isUser = message.role === 'user';
   return (
     <div
@@ -45,7 +46,12 @@ export function MessageItem({ message, index, busy, isLast, editingIdx, editDraf
             </div>
           </div>
         ) : (
-          <MessageBubble message={message} busy={busy} isLast={isLast} />
+          <MessageBubble
+            message={message}
+            busy={busy}
+            isLast={isLast}
+            onApprovalsChange={onApprovalsChange ? (a) => onApprovalsChange(index, a) : undefined}
+          />
         )}
         <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
           <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--fg-4)', whiteSpace: 'nowrap', letterSpacing: 'var(--tracking-wide)', fontWeight: 500 }}>{isUser ? 'YOU' : 'SUPER'} · {formatTime(message.ts) || (busy && isLast ? 'now' : '')}</span>

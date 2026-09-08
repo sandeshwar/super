@@ -4,6 +4,7 @@ import TreeView from './components/TreeView';
 import ApproveView from './components/ApproveView';
 import ReportView from './components/ReportView';
 import SettingsView from './components/SettingsView';
+import { CanvasPopoutView } from './components/chat/CanvasPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CommandPalette } from './components/CommandPalette';
 import { Sidebar } from './components/shell/Sidebar';
@@ -13,9 +14,20 @@ import { useAppData } from './components/shell/hooks/useAppData';
 import { RouterProvider, useRouter, type TreeFilter, type TreeSort, type View } from './lib/router';
 import './App.css';
 
-function AppShell() {
+function CanvasShell() {
+  return (
+    <ErrorBoundary>
+      <CanvasPopoutView />
+    </ErrorBoundary>
+  );
+}
+
+function MainShell() {
   const { route, view, navigate } = useRouter();
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('super-sidebar-collapsed') === '1'; } catch { return false; }
+  });
   const menuBtnRef = useRef<HTMLButtonElement | null>(null);
   const {
     model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
@@ -34,6 +46,7 @@ function AppShell() {
     });
     else if (v === 'approve') navigate({ view: 'approve', taskId: route.view === 'approve' ? route.taskId : null });
     else if (v === 'settings') navigate({ view: 'settings' });
+    else if (v === 'canvas') navigate({ view: 'canvas' });
     else navigate({ view: 'report' });
   }, [navigate, route]);
 
@@ -116,8 +129,16 @@ function AppShell() {
     }
   }, [mobileNav]);
 
+  const toggleSidebarCollapsed = useCallback(() => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('super-sidebar-collapsed', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  }, []);
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
       <CommandPalette items={paletteItems} />
       <Sidebar
         view={view}
@@ -133,6 +154,12 @@ function AppShell() {
         setError={setError}
         offlinePending={offlinePending}
         mobileNav={mobileNav}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => {
+          // On narrow screens the hamburger opens the drawer; otherwise collapse.
+          if (window.matchMedia('(max-width: 820px)').matches) setMobileNav((v) => !v);
+          else toggleSidebarCollapsed();
+        }}
         refresh={refresh}
         onOpenProblems={goResultsProblems}
       />
@@ -246,4 +273,10 @@ export default function App() {
       <AppShell />
     </RouterProvider>
   );
+}
+
+function AppShell() {
+  const { route } = useRouter();
+  if (route.view === 'canvas') return <CanvasShell />;
+  return <MainShell />;
 }

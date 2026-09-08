@@ -8,10 +8,15 @@ import { ChatHeader } from './chat/ChatHeader';
 import { ContextBar } from './chat/ContextBar';
 import { MessageList } from './chat/MessageList';
 import { ChatDock } from './chat/ChatDock';
+import { ToolRail } from './chat/ToolRail';
+import { CanvasPanel, useCanvasController } from './chat/CanvasPanel';
 
 /**
  * ChatView — orchestrator only. All UI slices live in ./chat/*,
  * state lives in useChat(). Keeps the view thin, testable, and SOLID.
+ *
+ * Layout: [sessions | chat card | canvas] — canvas is a sibling of the chat
+ * panel (not nested inside it) and follows the active session's artifacts.
  */
 export default function ChatView({
   sessionId,
@@ -30,13 +35,23 @@ export default function ChatView({
     llmStats,
     agentView, parentId, activeSpanId, selectSession, selectSpan, backToParent,
     send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
-    handleInputChange, handleFile, setShowSlash, setShowMention,
+    handleInputChange, handleFile, setShowSlash, setShowMention, patchApprovals,
   } = useChat({ sessionId, onSessionIdChange, contextLength });
 
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const canvas = useCanvasController(messages, activeId);
+  const showCanvasCol = canvas.hasArtifacts || canvas.detached;
 
   return (
-    <div className={`cols-chat ${sessionsOpen ? 'sessions-open' : ''}`}>
+    <div
+      className={[
+        'cols-chat',
+        sessionsOpen ? 'sessions-open' : '',
+        showCanvasCol ? 'has-canvas' : '',
+        showCanvasCol && !canvas.open && !canvas.detached ? 'canvas-collapsed' : '',
+        canvas.detached ? 'canvas-detached' : '',
+      ].filter(Boolean).join(' ')}
+    >
       <div className="chat-sessions-toggle-row">
         <Button size="sm" variant="ghost" onClick={() => setSessionsOpen((v) => !v)} aria-expanded={sessionsOpen}>
           {sessionsOpen ? 'Hide chats' : `Chats${sessions.length ? ` (${sessions.length})` : ''}`}
@@ -80,25 +95,29 @@ export default function ChatView({
           onBackToParent={backToParent}
         />
         <ContextBar tokenStats={tokenStats} leaf={leaf} messagesLen={messages.length} cost={cost} llmStats={llmStats} busy={busy} />
-        <MessageList
-          messages={messages}
-          busy={busy}
-          error={error}
-          editingIdx={editingIdx}
-          editDraft={editDraft}
-          setEditDraft={setEditDraft}
-          setEditingIdx={setEditingIdx}
-          onEditAndResend={(idx) => void editAndResend(idx)}
-          onCopy={(c) => navigator.clipboard.writeText(c).catch(() => setError('Clipboard blocked'))}
-          onEdit={(idx) => { setEditingIdx(idx); setEditDraft(messages[idx].content); }}
-          onBranch={(idx) => void branchFrom(idx)}
-          onRegenerate={(idx) => void regenerate(idx)}
-          onStop={stop}
-          onSetInput={(v) => handleInputChange(v)}
-          onSendSuggestion={(v) => void send(v)}
-          onClearError={() => setError(null)}
-          bottomRef={bottomRef}
-        />
+        <div className="chat-main">
+          <MessageList
+            messages={messages}
+            busy={busy}
+            error={error}
+            editingIdx={editingIdx}
+            editDraft={editDraft}
+            setEditDraft={setEditDraft}
+            setEditingIdx={setEditingIdx}
+            onEditAndResend={(idx) => void editAndResend(idx)}
+            onCopy={(c) => navigator.clipboard.writeText(c).catch(() => setError('Clipboard blocked'))}
+            onEdit={(idx) => { setEditingIdx(idx); setEditDraft(messages[idx].content); }}
+            onBranch={(idx) => void branchFrom(idx)}
+            onRegenerate={(idx) => void regenerate(idx)}
+            onStop={stop}
+            onSetInput={(v) => handleInputChange(v)}
+            onSendSuggestion={(v) => void send(v)}
+            onClearError={() => setError(null)}
+            onApprovalsChange={patchApprovals}
+            bottomRef={bottomRef}
+          />
+          <ToolRail messages={messages} busy={busy} />
+        </div>
         <ChatDock
           input={input}
           busy={busy}
@@ -108,8 +127,8 @@ export default function ChatView({
           slashFilter={slashFilter}
           showMention={showMention}
           mentionFilter={mentionFilter}
-          mentionIndex={mentionIndex}
           mentionPaths={mentionPaths}
+          mentionIndex={mentionIndex}
           setMentionIndex={setMentionIndex}
           onClosePopovers={() => { setShowSlash(false); setShowMention(false); }}
           onInput={handleInputChange}
@@ -120,6 +139,21 @@ export default function ChatView({
           inputRef={inputRef}
         />
       </Card>
+
+      {showCanvasCol && (
+        <CanvasPanel
+          artifacts={canvas.artifacts}
+          activeId={canvas.activeId}
+          open={canvas.open}
+          detached={canvas.detached}
+          onSelect={canvas.setActiveId}
+          onOpenChange={canvas.setOpen}
+          onClose={canvas.close}
+          onCloseOne={canvas.closeOne}
+          onDetach={canvas.detach}
+          onReattach={canvas.reattach}
+        />
+      )}
     </div>
   );
 }

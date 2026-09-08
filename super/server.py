@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -20,6 +21,41 @@ MIME = {".html": "text/html", ".js": "text/javascript", ".css": "text/css",
         ".svg": "image/svg+xml", ".json": "application/json", ".png": "image/png"}
 
 MAX_BODY = 1_000_000
+
+# In-flight chat generations: session_id → cancel Event.
+# Client disconnect does NOT cancel; only /api/chat/cancel (or a newer run) does.
+_CHAT_RUNS: dict[str, threading.Event] = {}
+_CHAT_RUNS_LOCK = threading.Lock()
+
+
+def _chat_run_begin(sid: str) -> threading.Event:
+    ev = threading.Event()
+    with _CHAT_RUNS_LOCK:
+        prev = _CHAT_RUNS.get(sid)
+        if prev is not None:
+            prev.set()
+        _CHAT_RUNS[sid] = ev
+    return ev
+
+
+def _chat_run_end(sid: str, ev: threading.Event) -> None:
+    with _CHAT_RUNS_LOCK:
+        if _CHAT_RUNS.get(sid) is ev:
+            _CHAT_RUNS.pop(sid, None)
+
+
+def _chat_run_active(sid: str) -> bool:
+    with _CHAT_RUNS_LOCK:
+        return sid in _CHAT_RUNS
+
+
+def _chat_run_cancel(sid: str) -> bool:
+    with _CHAT_RUNS_LOCK:
+        ev = _CHAT_RUNS.get(sid)
+    if ev is None:
+        return False
+    ev.set()
+    return True
 
 
 def _report(cfg: dict) -> dict:
@@ -47,13 +83,17 @@ class Handler(BaseHTTPRequestHandler):
     # -- helpers ---------------------------------------------------------
     def _send_json(self, obj: dict | list, code: int = 200) -> None:
         body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client navigated away / aborted poll — not a server fault.
+            pass
 
     def _send_file(self, name: str) -> None:
         path = os.path.normpath(os.path.join(WEB_DIR, name))
@@ -61,14 +101,17 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "not found", "code": 404}, 404)
         with open(path, "rb") as f:
             body = f.read()
-        self.send_response(200)
-        self.send_header("Content-Type", MIME.get(os.path.splitext(name)[1], "application/octet-stream"))
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Referrer-Policy", "no-referrer")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", MIME.get(os.path.splitext(name)[1], "application/octet-stream"))
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _body(self) -> dict:
         try:
@@ -97,9 +140,9 @@ class Handler(BaseHTTPRequestHandler):
         return json_i < 0 or html_i < json_i
 
     def _is_spa_path(self, path: str) -> bool:
-        if path in ("/", "/chat", "/tree", "/approve", "/report", "/settings"):
+        if path in ("/", "/chat", "/tree", "/approve", "/report", "/settings", "/canvas"):
             return True
-        for prefix in ("/chat/", "/tree/", "/approve/", "/report/", "/settings/"):
+        for prefix in ("/chat/", "/tree/", "/approve/", "/report/", "/settings/", "/canvas/"):
             if path.startswith(prefix):
                 return True
         return False
@@ -116,6 +159,46 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_file("index.html")
         if u.path.startswith("/assets/") or u.path in ("/favicon.svg", "/icons.svg"):
             return self._send_file(u.path.lstrip("/"))
+        if u.path.startswith("/api/media/"):
+            from . import media as _media
+            mid = u.path[len("/api/media/"):].strip("/")
+            hit = _media.resolve_media_file(CFG, mid)
+            if not hit:
+                return self._send_json({"error": "not found", "code": 404}, 404)
+            path, mime = hit
+            try:
+                with open(path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            return
+        if u.path.startswith("/api/canvas/"):
+            from . import canvas as _canvas
+            cid = u.path[len("/api/canvas/"):].strip("/")
+            hit = _canvas.resolve_canvas_file(CFG, cid)
+            if not hit:
+                return self._send_json({"error": "not found", "code": 404}, 404)
+            path, mime = hit
+            try:
+                with open(path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            return
         if u.path in ("/health", "/api/health"):
             from . import llm
 
@@ -304,13 +387,22 @@ class Handler(BaseHTTPRequestHandler):
             except (KeyError, TaskNotFound):
                 return self._send_json({"error": "no such task", "code": 404}, 404)
         if u.path == "/api/sessions":
-            return self._send_json({"sessions": sessions.list_all(CFG)})
+            rows = sessions.list_all(CFG)
+            for r in rows:
+                r["generating"] = _chat_run_active(r["id"])
+            return self._send_json({"sessions": rows})
+        if u.path == "/api/approvals":
+            from . import approvals as _appr
+            items = _appr.list_pending(CFG)
+            return self._send_json({"approvals": items, "count": len(items)})
         if u.path == "/api/session":
             sid = (q.get("id", [""])[0] or "").strip()
             s = sessions.get(CFG, sid) if sid else None
             if not s:
                 return self._send_json({"error": "no such session", "code": 404}, 404)
-            return self._send_json(s)
+            out = dict(s)
+            out["generating"] = _chat_run_active(sid)
+            return self._send_json(out)
         if u.path == "/api/leaf":
             from . import tasks as _tasks
             leaf = _tasks.leaf(CFG)
@@ -695,6 +787,12 @@ class Handler(BaseHTTPRequestHandler):
                     CFG.clear()
                     CFG.update(updated)
                     _cfg.save(CFG)
+                    if isinstance(patch, dict) and "mcp" in patch:
+                        try:
+                            from .tools.mcp_bridge import sync_mcp
+                            sync_mcp(CFG, force=True)
+                        except Exception:
+                            pass
                     return self._send_json({"ok": True, "config": _cfg.public_view(CFG)})
                 except ConfigError as e:
                     return self._send_json({"error": str(e), "code": 400}, 400)
@@ -747,6 +845,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"ok": True, "workspace": CFG["_root"], "model": CFG["llm"]["model"]})
                 except Exception as e:
                     return self._send_json({"error": f"reload failed: {e}", "code": 500}, 500)
+            if self.path.split("?")[0] == "/api/chat/cancel":
+                sid = str(body.get("session_id") or body.get("id") or "").strip()
+                if not sid:
+                    return self._send_json({"error": "session_id required", "code": 400}, 400)
+                return self._send_json({"ok": True, "cancelled": _chat_run_cancel(sid)})
             if self.path.split("?")[0] == "/api/chat":
                 msg = str(body.get("message", ""))
                 if not msg.strip():
@@ -789,18 +892,42 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     messages.append({"role": "user", "content": user_text})
                     sessions.append(CFG, sid, "user", user_text)
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_header("Connection", "close")
-                self.send_header("X-Content-Type-Options", "nosniff")
-                self.end_headers()
                 try:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
+                    self.send_header("X-Content-Type-Options", "nosniff")
+                    self.end_headers()
+                except (BrokenPipeError, ConnectionResetError):
+                    # Client already gone — still run to completion and persist.
+                    pass
+
+                cancel_ev = _chat_run_begin(sid)
+                client_gone = False
+
+                def _emit(obj: dict) -> None:
+                    nonlocal client_gone
+                    if client_gone:
+                        return
+                    try:
+                        self.wfile.write(f"data: {json.dumps(obj)}\n\n".encode())
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        client_gone = True
+
+                try:
+                    from . import approvals as _appr
                     tools_on = bool((CFG.get("tools") or {}).get("enabled", True))
                     reply = ""
+                    thinking = ""
+                    thoughts: list[str] = []
+                    blocks: list[dict] = []
                     agent_meta: dict = {}
                     tool_events: list[dict] = []
                     child_by_span: dict[str, dict] = {}
+                    approval_events: list[dict] = []
+                    cancelled = False
                     if tools_on:
                         from .tools.runtime import run_agent_stream
                         import uuid as _uuid
@@ -812,11 +939,50 @@ class Handler(BaseHTTPRequestHandler):
                             "run_id": _uuid.uuid4().hex[:12],
                         }
                         for ev in run_agent_stream(run_cfg, messages):
+                            if cancel_ev.is_set():
+                                cancelled = True
+                                break
+                            if "thinking_delta" in ev and ev["thinking_delta"]:
+                                thinking += ev["thinking_delta"]
                             if "delta" in ev:
                                 reply += ev["delta"]
+                            if isinstance(ev.get("blocks"), list):
+                                blocks = [b for b in ev["blocks"] if isinstance(b, dict)]
+                            ts = ev.get("thinking_step")
+                            if isinstance(ts, dict) and isinstance(ts.get("content"), str) and ts["content"]:
+                                idx = ts.get("index")
+                                if isinstance(idx, int) and 0 <= idx < len(thoughts):
+                                    thoughts[idx] = ts["content"]
+                                elif isinstance(idx, int) and idx == len(thoughts):
+                                    thoughts.append(ts["content"])
+                                else:
+                                    thoughts.append(ts["content"])
+                                thinking = "\n\n".join(thoughts)
+                            if "thoughts" in ev and isinstance(ev.get("thoughts"), list):
+                                thoughts = [str(x) for x in ev["thoughts"] if isinstance(x, str) and x]
+                                thinking = "\n\n".join(thoughts) if thoughts else thinking
+                            if "thinking" in ev and isinstance(ev.get("thinking"), str) and ev["thinking"]:
+                                thinking = ev["thinking"]
                             if "agent_meta" in ev:
                                 agent_meta = ev["agent_meta"]
                                 reply = ev.get("reply") or reply
+                                if isinstance(ev.get("blocks"), list):
+                                    blocks = [b for b in ev["blocks"] if isinstance(b, dict)]
+                                elif isinstance(agent_meta.get("blocks"), list):
+                                    blocks = [b for b in agent_meta["blocks"] if isinstance(b, dict)]
+                                if isinstance(ev.get("thoughts"), list):
+                                    thoughts = [str(x) for x in ev["thoughts"] if isinstance(x, str) and x]
+                                elif isinstance(agent_meta.get("thoughts"), list):
+                                    thoughts = [
+                                        str(x) for x in agent_meta["thoughts"]
+                                        if isinstance(x, str) and x
+                                    ]
+                                if isinstance(ev.get("thinking"), str) and ev["thinking"]:
+                                    thinking = ev["thinking"]
+                                elif isinstance(agent_meta.get("thinking"), str) and agent_meta["thinking"]:
+                                    thinking = agent_meta["thinking"]
+                                elif thoughts:
+                                    thinking = "\n\n".join(thoughts)
                             tc = ev.get("tool_call")
                             if isinstance(tc, dict) and tc.get("name"):
                                 tool_events.append({
@@ -826,24 +992,43 @@ class Handler(BaseHTTPRequestHandler):
                                 })
                             tr = ev.get("tool_result")
                             if isinstance(tr, dict) and tr.get("name"):
-                                tool_events.append({
+                                row = {
                                     "kind": "result",
                                     "name": tr.get("name"),
                                     "ok": tr.get("ok"),
                                     "content": tr.get("content"),
-                                })
+                                }
+                                if isinstance(tr.get("media"), list) and tr["media"]:
+                                    row["media"] = tr["media"]
+                                if isinstance(tr.get("canvas"), dict) and tr["canvas"]:
+                                    row["canvas"] = tr["canvas"]
+                                tool_events.append(row)
+                                ap = _appr.from_tool_result(
+                                    str(tr.get("name") or ""),
+                                    tr.get("content") if isinstance(tr.get("content"), str) else None,
+                                    ok=bool(tr.get("ok", True)),
+                                )
+                                if ap:
+                                    approval_events.append(ap)
+                                    _emit({"approval": ap})
                             ca = ev.get("child_agent")
                             if isinstance(ca, dict) and ca.get("span_id"):
                                 child_by_span[str(ca["span_id"])] = ca
-                            self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
-                            self.wfile.flush()
+                            _emit(ev)
                     else:
                         from . import llm
                         import time as _time
                         chunks: list[str] = []
+                        think_chunks: list[str] = []
                         t_first = None
                         chars = 0
                         for ev in llm.chat_stream(CFG, messages):
+                            if cancel_ev.is_set():
+                                cancelled = True
+                                break
+                            if "thinking_delta" in ev and ev["thinking_delta"]:
+                                think_chunks.append(ev["thinking_delta"])
+                                _emit({"thinking_delta": ev["thinking_delta"]})
                             if "delta" in ev:
                                 d = ev["delta"]
                                 chunks.append(d)
@@ -851,44 +1036,64 @@ class Handler(BaseHTTPRequestHandler):
                                 now = _time.monotonic()
                                 if t_first is None:
                                     t_first = now
+                                    _emit({"delta": d})
                                 elif now > t_first:
-                                    # live decode estimate while tokens arrive
                                     tok = max(1, chars // 4)
                                     live = {
                                         "source": "live",
                                         "completion_tokens": tok,
                                         "decode_tps": round(tok / (now - t_first), 2),
                                     }
-                                    self.wfile.write(f"data: {json.dumps({'delta': d, 'llm_stats': live})}\n\n".encode())
+                                    _emit({"delta": d, "llm_stats": live})
                                 else:
-                                    self.wfile.write(f"data: {json.dumps({'delta': d})}\n\n".encode())
-                                self.wfile.flush()
+                                    _emit({"delta": d})
                             elif "usage" in ev and isinstance(ev["usage"], dict):
-                                self.wfile.write(f"data: {json.dumps({'llm_stats': ev['usage']})}\n\n".encode())
-                                self.wfile.flush()
-                                if agent_meta is not None:
-                                    pass
+                                _emit({"llm_stats": ev["usage"]})
                                 agent_meta = {**(agent_meta or {}), "llm_stats": ev["usage"]}
+                            elif "message" in ev and isinstance(ev["message"], dict):
+                                m = ev["message"]
+                                if m.get("thinking"):
+                                    thinking = m["thinking"]
                         reply = "".join(chunks)
-                    gate = harness.check_reply(CFG, reply)
-                    if agent_meta:
-                        gate = {**gate, "agent": agent_meta}
-                    children = list(child_by_span.values()) or None
-                    sessions.append(
-                        CFG, sid, "assistant", reply,
-                        gate=gate, tools=tool_events or None, children=children,
-                    )
-                    self.wfile.write(
-                        f"data: {json.dumps({'done': True, 'session_id': sid, 'gate': gate})}\n\n".encode())
-                    self.wfile.flush()
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
+                        if not thinking:
+                            thinking = "".join(think_chunks)
+                    if cancelled and not (reply or "").strip() and not tool_events and not (thinking or "").strip():
+                        # Explicit stop before any tokens — nothing to persist.
+                        pass
+                    else:
+                        if cancelled and (reply or "").strip():
+                            reply = (reply or "").rstrip() + "\n\n_(stopped)_"
+                        gate = harness.check_reply(CFG, reply)
+                        if agent_meta:
+                            gate = {**gate, "agent": agent_meta}
+                        if cancelled:
+                            gate = {**gate, "cancelled": True}
+                        children = list(child_by_span.values()) or None
+                        # Dedupe approvals by kind+id
+                        seen_ap: set[tuple] = set()
+                        uniq_ap: list[dict] = []
+                        for a in approval_events:
+                            key = (a.get("kind"), a.get("id"))
+                            if key in seen_ap:
+                                continue
+                            seen_ap.add(key)
+                            uniq_ap.append(a)
+                        sessions.append(
+                            CFG, sid, "assistant", reply,
+                            gate=gate, tools=tool_events or None, children=children,
+                            approvals=uniq_ap or None,
+                            thinking=thinking or None,
+                            thoughts=thoughts or None,
+                            blocks=blocks or None,
+                        )
+                        _emit({"done": True, "session_id": sid, "gate": gate, "approvals": uniq_ap})
                 except Exception as e:
                     try:
-                        self.wfile.write(f"data: {json.dumps({'error': str(e)})}\n\n".encode())
-                        self.wfile.flush()
+                        _emit({"error": str(e)})
                     except Exception:
                         pass
+                finally:
+                    _chat_run_end(sid, cancel_ev)
                 return
         except KeyError as e:
             return self._send_json({"error": str(e), "code": 404}, 404)
@@ -932,6 +1137,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *a) -> None:
         pass
+
+    def handle_error(self, request, client_address) -> None:
+        import sys
+        exc = sys.exception()
+        if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def _watch_config():

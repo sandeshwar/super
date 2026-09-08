@@ -17,7 +17,7 @@ import {
   type ReactNode,
 } from 'react';
 
-export type View = 'chat' | 'tree' | 'approve' | 'report' | 'settings';
+export type View = 'chat' | 'tree' | 'approve' | 'report' | 'settings' | 'canvas';
 
 export type TreeFilter = 'all' | 'waiting' | 'doing' | 'proven' | 'blocked';
 export type TreeSort = 'id' | 'status';
@@ -27,9 +27,10 @@ export type Route =
   | { view: 'tree'; taskId: string | null; q: string; status: TreeFilter; sort: TreeSort }
   | { view: 'approve'; taskId: string | null }
   | { view: 'report' }
-  | { view: 'settings' };
+  | { view: 'settings' }
+  | { view: 'canvas' };
 
-const VIEWS = new Set<View>(['chat', 'tree', 'approve', 'report', 'settings']);
+const VIEWS = new Set<View>(['chat', 'tree', 'approve', 'report', 'settings', 'canvas']);
 const TREE_STATUS = new Set<TreeFilter>(['all', 'waiting', 'doing', 'proven', 'blocked']);
 const TREE_SORT = new Set<TreeSort>(['id', 'status']);
 const ROUTE_QUERY = new Set(['q', 'status', 'sort']);
@@ -86,6 +87,7 @@ export function parsePath(pathname: string, search = ''): Route {
   if (view === 'approve') return { view: 'approve', taskId: id };
   if (view === 'report') return { view: 'report' };
   if (view === 'settings') return { view: 'settings' };
+  if (view === 'canvas') return { view: 'canvas' };
   return { view: 'chat', sessionId: id };
 }
 

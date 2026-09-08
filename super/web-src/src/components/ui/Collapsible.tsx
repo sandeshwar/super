@@ -6,6 +6,11 @@ type Props = {
   meta?: ReactNode;
   badge?: ReactNode;
   defaultOpen?: boolean;
+  /** Controlled open state (takes precedence over defaultOpen). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Animate expand/collapse via grid-template-rows instead of mount/unmount. */
+  animated?: boolean;
   /** persist open state across reloads */
   storageKey?: string;
   children: ReactNode;
@@ -19,8 +24,12 @@ type Props = {
  * Token-first flat styling; chevron rotates on open.
  * Pass storageKey to persist across reloads (sidebar/panels).
  */
-export function Collapsible({ title, meta, badge, defaultOpen = true, storageKey, children, className, style, compact }: Props) {
-  const [open, setOpen] = useState<boolean>(() => {
+export function Collapsible({
+  title, meta, badge, defaultOpen = true, open: openProp, onOpenChange,
+  animated, storageKey, children, className, style, compact,
+}: Props) {
+  const controlled = openProp !== undefined;
+  const [uncontrolled, setUncontrolled] = useState<boolean>(() => {
     if (!storageKey) return defaultOpen;
     try {
       const v = localStorage.getItem(`super_collapse_${storageKey}`);
@@ -29,19 +38,21 @@ export function Collapsible({ title, meta, badge, defaultOpen = true, storageKey
       return defaultOpen;
     }
   });
+  const open = controlled ? Boolean(openProp) : uncontrolled;
 
   const toggle = () => {
-    setOpen((o) => {
-      const n = !o;
+    const n = !open;
+    if (!controlled) {
+      setUncontrolled(n);
       if (storageKey) {
         try { localStorage.setItem(`super_collapse_${storageKey}`, n ? '1' : '0'); } catch { /* ignore */ }
       }
-      return n;
-    });
+    }
+    onOpenChange?.(n);
   };
 
   return (
-    <section className={cn('collapsible', !open && 'collapsed', compact && 'collapsible-compact', className)} style={style}>
+    <section className={cn('collapsible', !open && 'collapsed', compact && 'collapsible-compact', animated && 'collapsible-animated', className)} style={style}>
       <button
         type="button"
         className="collapsible-head"
@@ -62,7 +73,15 @@ export function Collapsible({ title, meta, badge, defaultOpen = true, storageKey
         {badge}
         {meta && <span className="collapsible-meta">{meta}</span>}
       </button>
-      {open && <div className="collapsible-body">{children}</div>}
+      {animated ? (
+        <div className={cn('collapsible-panel', open && 'is-open')}>
+          <div className="collapsible-panel-inner">
+            <div className="collapsible-body">{children}</div>
+          </div>
+        </div>
+      ) : (
+        open && <div className="collapsible-body">{children}</div>
+      )}
     </section>
   );
 }

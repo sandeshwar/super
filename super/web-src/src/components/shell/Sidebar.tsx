@@ -25,13 +25,15 @@ type Props = {
   setError: (v: string | null) => void;
   offlinePending: number;
   mobileNav: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   refresh: () => void;
   onOpenProblems?: () => void;
 };
 
 export function Sidebar({
   view, tasks, gates, criticals, stats, workspace, onWorkspaceChange, reloadFlash, setReloadFlash,
-  error, setError, offlinePending, mobileNav, refresh, onOpenProblems,
+  error, setError, offlinePending, mobileNav, collapsed, onToggleCollapsed, refresh, onOpenProblems,
 }: Props) {
   const applyWorkspace = async (path: string) => {
     try {
@@ -57,9 +59,25 @@ export function Sidebar({
   };
 
   return (
-    <aside id="app-sidebar" className={`app-sidebar ${mobileNav ? 'open' : ''}`} aria-label="Sidebar">
+    <aside
+      id="app-sidebar"
+      className={`app-sidebar ${mobileNav ? 'open' : ''} ${collapsed ? 'is-collapsed' : ''}`}
+      aria-label="Sidebar"
+      aria-expanded={!collapsed}
+    >
       <div className="sidebar-top">
         <div className="brand">
+          <button
+            type="button"
+            className="icon-btn sidebar-hamburger"
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            aria-expanded={!collapsed}
+            aria-controls="app-sidebar"
+            onClick={onToggleCollapsed}
+            title={collapsed ? 'Expand nav' : 'Collapse nav'}
+          >
+            <Icons.menu size={16} />
+          </button>
           <div className="brand-mark" aria-hidden>S</div>
           <div className="brand-wordmark">SUPER<span>Generalist assistant</span></div>
           <span className="brand-version">v1.0</span>
@@ -79,9 +97,10 @@ export function Sidebar({
                 to={{ view: v }}
                 className={`nav-item ${isActive ? 'active' : ''}`}
                 aria-current={isActive ? 'page' : undefined}
+                title={VIEW_META[v].title}
               >
                 <Icon size={16} />
-                <span style={{ flex: 1, textAlign: 'left' }}>{VIEW_META[v].title}</span>
+                <span className="nav-item-label" style={{ flex: 1, textAlign: 'left' }}>{VIEW_META[v].title}</span>
                 {v === 'approve' && stats.pending > 0 && !isActive && (
                   <Badge variant="warning" style={{ fontSize: 'var(--text-xs)' }}>{stats.pending}</Badge>
                 )}
@@ -100,9 +119,10 @@ export function Sidebar({
             to={{ view: 'settings' }}
             className={`nav-item ${view === 'settings' ? 'active' : ''}`}
             aria-current={view === 'settings' ? 'page' : undefined}
+            title={VIEW_META.settings.title}
           >
             <Icons.settings size={16} />
-            <span style={{ flex: 1, textAlign: 'left' }}>{VIEW_META.settings.title}</span>
+            <span className="nav-item-label" style={{ flex: 1, textAlign: 'left' }}>{VIEW_META.settings.title}</span>
           </Link>
         </div>
 

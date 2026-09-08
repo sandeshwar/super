@@ -30,6 +30,12 @@ def enabled_groups(cfg: dict) -> set[str]:
         # external packs default off unless explicitly enabled
         if gid.startswith("lc_") or gid == "crewai":
             default = False
+        elif gid == "mcp":
+            try:
+                from .mcp_bridge import mcp_group_enabled
+                default = mcp_group_enabled(cfg)
+            except Exception:
+                default = False
         else:
             default = gid != "web"
         if bool(groups.get(gid, default)):
@@ -57,7 +63,7 @@ def discoverable_groups(cfg: dict) -> set[str]:
     eg = enabled_groups(cfg)
     out = set(eg)
     for spec in TOOLS.values():
-        if spec.lazy_pack or (spec.group.startswith("lc_") or spec.group == "crewai"):
+        if spec.lazy_pack or (spec.group.startswith("lc_") or spec.group == "crewai" or spec.group == "mcp"):
             out.add(spec.group)
     return out
 
@@ -111,12 +117,18 @@ def schemas_for_llm(cfg: dict) -> list[dict]:
 
 
 def _row(spec) -> dict:
+    if spec.lazy_pack or spec.group.startswith("lc_") or spec.group == "crewai":
+        source = "pack"
+    elif spec.group == "mcp":
+        source = "mcp"
+    else:
+        source = "builtin"
     return {
         "name": spec.name,
         "group": spec.group,
         "summary": spec.summary,
         "risk": spec.risk,
-        "source": "pack" if (spec.lazy_pack or spec.group.startswith("lc_") or spec.group == "crewai") else "builtin",
+        "source": source,
         "lazy": bool(spec.lazy_pack),
     }
 
@@ -204,6 +216,12 @@ def handle_describe_tool(cfg: dict, args: dict) -> ToolResult:
     if spec.group not in enabled_groups(cfg) and not spec.discovery:
         return ToolResult(False, f"tool disabled in settings: {name}")
 
+    if spec.group.startswith("lc_") or spec.group == "crewai":
+        source = "pack"
+    elif spec.group == "mcp":
+        source = "mcp"
+    else:
+        source = "builtin"
     return ToolResult(True, dump_json({
         "name": spec.name,
         "group": spec.group,
@@ -211,17 +229,15 @@ def handle_describe_tool(cfg: dict, args: dict) -> ToolResult:
         "description": spec.description,
         "risk": spec.risk,
         "parameters": spec.parameters,
-        "source": "pack" if (spec.group.startswith("lc_") or spec.group == "crewai") else "builtin",
+        "source": source,
         "ready": True,
     }))
 
 
 def handle_activate_tools(cfg: dict, args: dict) -> ToolResult:
-    names = args.get("names") or []
-    if isinstance(names, str):
-        names = [n.strip() for n in names.split(",") if n.strip()]
-    if not isinstance(names, list) or not names:
-        return ToolResult(False, "names must be a non-empty list")
+    names = _coerce_tool_names(args)
+    if not names:
+        return ToolResult(False, "names must be a non-empty list (or name=…)")
     try:
         from .langchain_bridge import ensure_bridge, ensure_tool_materialized
         ensure_bridge(cfg)
@@ -270,3 +286,46 @@ def handle_activate_tools(cfg: dict, args: dict) -> ToolResult:
         "schemas": schemas,
         "note": "These tools are now callable in this turn.",
     }), {"activated": sorted(activated)})
+
+
+def _coerce_tool_names(args: dict) -> list[str]:
+    """Accept names / name as list, comma-string, or JSON array string.
+
+    Models often pass ``name='["canvas_present"]'`` or ``names='canvas_present'``.
+    """
+    import json as _json
+
+    def _from_value(val: object) -> list[str]:
+        if val is None:
+            return []
+        if isinstance(val, list):
+            out: list[str] = []
+            for item in val:
+                out.extend(_from_value(item))
+            return out
+        if isinstance(val, str):
+            s = val.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    parsed = _json.loads(s)
+                    return _from_value(parsed)
+                except Exception:
+                    pass
+            if "," in s:
+                return [n.strip() for n in s.split(",") if n.strip()]
+            return [s]
+        return [str(val).strip()] if str(val).strip() else []
+
+    names = _from_value(args.get("names"))
+    if not names:
+        names = _from_value(args.get("name"))
+    # de-dupe preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out

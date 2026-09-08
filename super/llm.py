@@ -10,11 +10,47 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 import urllib.error
 import urllib.request
 
 from .errors import LLMError
+
+_THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+
+
+def think_param(cfg: dict) -> bool | str:
+    """Normalize llm.think for the Ollama chat payload (top-level ``think``)."""
+    raw = (cfg.get("llm") or {}).get("think", True)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        if s in ("false", "0", "no", "off", ""):
+            return False
+        if s in ("true", "1", "yes", "on"):
+            return True
+        if s in ("low", "medium", "high", "max"):
+            return s
+    return bool(raw)
+
+
+def _with_think(payload: dict, cfg: dict) -> dict:
+    payload["think"] = think_param(cfg)
+    return payload
+
+
+def split_think_tags(content: str) -> tuple[str, str]:
+    """Fallback: peel ``<think>`` blocks out of content when the API didn't."""
+    if not content or "<think>" not in content.lower():
+        return content or "", ""
+    parts = _THINK_TAG_RE.findall(content)
+    if not parts:
+        return content, ""
+    thinking = "\n\n".join(p.strip() for p in parts if p.strip())
+    cleaned = _THINK_TAG_RE.sub("", content).strip()
+    return cleaned, thinking
 
 
 def _post(cfg: dict, path: str, payload: dict, timeout: float) -> bytes:
@@ -95,7 +131,9 @@ def chat_message(cfg: dict, messages: list[dict], tools: list[dict] | None = Non
     llm = cfg["llm"]
     timeout = float(llm.get("timeout_s", 120))
     retries = int(llm.get("retries", 2))
-    payload: dict = {"model": llm["model"], "messages": messages, "stream": False}
+    payload: dict = _with_think(
+        {"model": llm["model"], "messages": messages, "stream": False}, cfg
+    )
     if tools:
         payload["tools"] = tools
     last: Exception | None = None
@@ -108,7 +146,13 @@ def chat_message(cfg: dict, messages: list[dict], tools: list[dict] | None = Non
                 raise LLMError("model returned a malformed message")
             content = msg.get("content") or ""
             tool_calls = msg.get("tool_calls") or []
-            if not content and not tool_calls:
+            thinking = msg.get("thinking") or ""
+            if content and not thinking:
+                content, tagged = split_think_tags(content)
+                if tagged:
+                    msg = {**msg, "content": content, "thinking": tagged}
+                    thinking = tagged
+            if not content and not tool_calls and not thinking:
                 raise LLMError("model returned an empty completion")
             return msg, extract_usage(body if isinstance(body, dict) else None)
         except (LLMError, ValueError, KeyError) as e:
@@ -139,15 +183,18 @@ def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None
     """Yield stream events from /api/chat.
 
     Yields:
+      {"thinking_delta": str} — reasoning token/chunk (when llm.think enabled)
       {"delta": str}          — content token/chunk
       {"tool_calls": list}    — full tool_calls when present (usually on final frame)
       {"usage": dict}         — provider timing when done
-      {"message": dict}       — assembled assistant message at end (content + tool_calls)
+      {"message": dict}       — assembled assistant message at end (content + tool_calls + thinking)
     """
     llm = cfg["llm"]
     timeout = float(llm.get("timeout_s", 120))
     url = llm["endpoint"].rstrip("/") + "/api/chat"
-    payload_obj: dict = {"model": llm["model"], "messages": messages, "stream": True}
+    payload_obj: dict = _with_think(
+        {"model": llm["model"], "messages": messages, "stream": True}, cfg
+    )
     if tools:
         payload_obj["tools"] = tools
     payload = json.dumps(payload_obj).encode()
@@ -158,7 +205,26 @@ def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None
         raise LLMError(f"model stream unreachable: {e}") from e
 
     content_parts: list[str] = []
+    thinking_parts: list[str] = []
     tool_calls: list = []
+
+    def _assemble() -> dict:
+        content = "".join(content_parts)
+        thinking = "".join(thinking_parts)
+        if content and not thinking:
+            content, tagged = split_think_tags(content)
+            if tagged:
+                thinking = tagged
+        assembled: dict = {
+            "role": "assistant",
+            "content": content,
+        }
+        if thinking:
+            assembled["thinking"] = thinking
+        if tool_calls:
+            assembled["tool_calls"] = tool_calls
+        return assembled
+
     with resp:
         for raw in resp:
             line = raw.decode().strip() if isinstance(raw, bytes) else str(raw).strip()
@@ -173,6 +239,10 @@ def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None
             msg = obj.get("message") or {}
             if not isinstance(msg, dict):
                 msg = {}
+            think_delta = msg.get("thinking") or ""
+            if think_delta:
+                thinking_parts.append(think_delta)
+                yield {"thinking_delta": think_delta}
             delta = msg.get("content") or ""
             if delta:
                 content_parts.append(delta)
@@ -186,25 +256,13 @@ def chat_stream(cfg: dict, messages: list[dict], tools: list[dict] | None = None
                 usage = extract_usage(obj)
                 if usage:
                     yield {"usage": usage}
-                assembled = {
-                    "role": "assistant",
-                    "content": "".join(content_parts),
-                }
-                if tool_calls:
-                    assembled["tool_calls"] = tool_calls
-                yield {"message": assembled}
+                yield {"message": _assemble()}
                 return
         # EOF without a done frame — still finish so the agent loop doesn't hang.
-        if content_parts or tool_calls:
+        if content_parts or tool_calls or thinking_parts:
             if tool_calls:
                 yield {"tool_calls": tool_calls}
-            assembled = {
-                "role": "assistant",
-                "content": "".join(content_parts),
-            }
-            if tool_calls:
-                assembled["tool_calls"] = tool_calls
-            yield {"message": assembled}
+            yield {"message": _assemble()}
 
 
 def chat_stream_text(cfg: dict, messages: list[dict]):

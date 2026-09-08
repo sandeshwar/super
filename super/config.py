@@ -24,6 +24,8 @@ DEFAULTS = {
         "timeout_s": 120,
         "retries": 2,
         "health_path": "/api/tags",
+        # Ollama thinking models: true|false|"low"|"medium"|"high"|"max"
+        "think": True,
     },
     "envelope": {
         "max_microtask_lines": 50,
@@ -93,6 +95,7 @@ DEFAULTS = {
             "capabilities": True,
             "intelligence": True,
             "user_caps": True,
+            "mcp": True,
         },
         "disabled": [],
         "packs": {
@@ -139,6 +142,30 @@ _BOOL_KEYS = {
 }
 
 
+def _sanitize_mcp_server(srv: dict) -> dict:
+    """Drop transport-incompatible fields (e.g. leftover url after SSE→stdio)."""
+    out = dict(srv)
+    out.pop("has_env", None)
+    transport = str(out.get("transport", "sse")).lower().strip() or "sse"
+    out["transport"] = transport
+    if transport == "stdio":
+        out.pop("url", None)
+        if "args" in out and out["args"] is None:
+            out["args"] = []
+        elif isinstance(out.get("args"), str):
+            raw = out["args"].strip()
+            out["args"] = raw.split() if raw else []
+    else:
+        out.pop("command", None)
+        out.pop("args", None)
+    # Drop empty optional blobs
+    if not out.get("env"):
+        out.pop("env", None)
+    if not out.get("headers"):
+        out.pop("headers", None)
+    return out
+
+
 def _deep_merge(base: dict, override: dict) -> dict:
     out = dict(base)
     for k, v in (override or {}).items():
@@ -173,6 +200,17 @@ def _validate(cfg: dict) -> None:
         timeout = cfg["llm"]["timeout_s"]
         if not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 3600:
             raise ConfigError("llm.timeout_s must be in (0, 3600]")
+        think = cfg["llm"].get("think", True)
+        if isinstance(think, bool):
+            pass
+        elif isinstance(think, str) and think.strip().lower() in (
+            "true", "false", "low", "medium", "high", "max",
+        ):
+            pass
+        else:
+            raise ConfigError(
+                "llm.think must be boolean or one of low|medium|high|max"
+            )
         env = cfg["envelope"]
         for k in ("max_microtask_lines", "best_of_n", "max_steps_per_task"):
             if not isinstance(env[k], int) or env[k] < 1 or env[k] > 1000:
@@ -324,8 +362,7 @@ def apply_patch(cfg: dict, patch: dict) -> dict:
         for s in safe_patch["mcp"].get("servers") or []:
             if not isinstance(s, dict):
                 continue
-            s = dict(s)
-            s.pop("has_env", None)
+            s = _sanitize_mcp_server(s)
             prev = by_id.get(str(s.get("id"))) or by_name.get(str(s.get("name")))
             if prev and "env" in prev and "env" not in s:
                 s["env"] = prev["env"]
@@ -377,10 +414,18 @@ def _ensure_token(cfg: dict) -> dict:
 
 
 def save(cfg: dict) -> None:
-    """Persist cfg llm/model + envelope + gates back to super.config.json (keeps _config_path)."""
-    path = cfg.get("_config_path") or find_config() or os.path.join(cfg.get("_root", os.getcwd()), "super.config.json")
+    """Persist cfg sections back to super.config.json (keeps _config_path).
+
+    Never climbs the filesystem via find_config — ephemeral/test cfgs with
+    ``_root`` set must write under that root, not a parent checkout's config.
+    """
+    path = cfg.get("_config_path")
+    if not path:
+        root = cfg.get("_root") or os.getcwd()
+        path = os.path.join(root, "super.config.json")
+        cfg["_config_path"] = path
     try:
-        # load existing to preserve comments structure? just merge
+        # load existing to preserve unknown keys
         existing = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as f:
@@ -388,10 +433,28 @@ def save(cfg: dict) -> None:
         # only persist known top-level keys
         for k in ("llm", "envelope", "gates", "verification", "quality", "security", "trust", "ambition", "mcp", "tools", "server", "state_dir"):
             if k in cfg:
-                # for llm, only persist endpoint/model/timeout etc, not _root
                 existing[k] = cfg[k]
+        # Prefer project-relative state_dir in the on-disk file (load() resolves abs).
+        root = cfg.get("_root")
+        sd = existing.get("state_dir")
+        if isinstance(sd, str) and sd and root:
+            abs_sd = os.path.abspath(sd)
+            abs_root = os.path.abspath(root)
+            try:
+                if abs_sd == abs_root or abs_sd.startswith(abs_root + os.sep):
+                    rel = os.path.relpath(abs_sd, abs_root)
+                    if rel in (".super", os.path.join(".", ".super")):
+                        existing["state_dir"] = "./.super"
+                    else:
+                        existing["state_dir"] = rel
+            except ValueError:
+                pass
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(existing, f, indent=2)
+            f.write("\n")
     except Exception as e:
         raise ConfigError(f"cannot save config {path}: {e}") from e
 

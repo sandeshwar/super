@@ -796,7 +796,7 @@ def handle_propose_capability(cfg: dict, args: dict) -> ToolResult:
         tip = (
             "Installed and callable after activate_tools."
             if cap.get("status") == "installed"
-            else "Pending human approval (Settings → Agents/Capabilities, or POST /api/capability approve)."
+            else "Pending human approval in chat (or Settings backlog / POST /api/capability approve)."
         )
         return ToolResult(True, dump_json({"capability": cap, "note": tip}), data={"id": cap["id"], "status": cap["status"]})
     except (ValueError, StoreError) as e:

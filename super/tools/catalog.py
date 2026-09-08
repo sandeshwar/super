@@ -56,6 +56,14 @@ GROUPS: dict[str, dict[str, str]] = {
         "title": "Intelligence",
         "blurb": "Autonomous agenda: audit gaps, pursue improvements, self-reflect",
     },
+    "mcp": {
+        "title": "MCP",
+        "blurb": "Tools from configured Model Context Protocol servers",
+    },
+    "canvas": {
+        "title": "Canvas",
+        "blurb": "Present web pages, images, video, markdown, and docs beside chat",
+    },
 }
 
 _OBJ = {"type": "object", "properties": {}, "additionalProperties": False}
@@ -80,8 +88,8 @@ def _int(desc: str, req: bool = False, **extra: Any) -> dict:
     return d
 
 
-def _bool(desc: str, req: bool = False) -> dict:
-    d = {"type": "boolean", "description": desc}
+def _bool(desc: str, req: bool = False, **extra: Any) -> dict:
+    d = {"type": "boolean", "description": desc, **extra}
     if req:
         d["_req"] = True
     return d
@@ -164,9 +172,13 @@ _reg(ToolSpec(
     description=(
         "Activate named tools for subsequent steps in this turn. "
         "Works the same for built-in and third-party tools (loads packs on demand). "
-        "Only activated (or discovery) tools are callable. Prefer activating 1–5 tools at a time."
+        "Only activated (or discovery) tools are callable. Prefer activating 1–5 tools at a time. "
+        "Pass names as a JSON array (preferred). Also accepts name=… or a comma-separated string."
     ),
-    parameters=_props(names={"type": "array", "items": {"type": "string"}, "description": "Tool names to activate", "_req": True}),
+    parameters=_props(
+        names={"type": "array", "items": {"type": "string"}, "description": "Tool names to activate, e.g. [\"canvas_present\"]"},
+        name=_str("Alias for a single tool name or JSON array string"),
+    ),
     handler=_activate_tools_handler,
     discovery=True,
 ))
@@ -288,6 +300,75 @@ _reg(ToolSpec("repo_tree", "project", "Show folder tree",
 _reg(ToolSpec("read_config", "project", "Read public config",
               "Return the public (non-secret) config, or one section.",
               _props(section=_str("Optional section name")), B.read_config_tool))
+
+# ── canvas (side-panel artifacts) ─────────────────────────────────────
+def _canvas_present_handler(cfg: dict, args: dict):
+    from .. import canvas as C
+    return C.handle_present(cfg, args)
+
+def _canvas_update_handler(cfg: dict, args: dict):
+    from .. import canvas as C
+    return C.handle_update(cfg, args)
+
+def _canvas_close_handler(cfg: dict, args: dict):
+    from .. import canvas as C
+    return C.handle_close(cfg, args)
+
+def _canvas_list_handler(cfg: dict, args: dict):
+    from .. import canvas as C
+    return C.handle_list(cfg, args)
+
+_CANVAS_KIND = _str(
+    "Artifact kind: url | image | video | markdown | html | file | doc",
+    **{"enum": ["url", "image", "video", "markdown", "html", "file", "doc"]},
+)
+
+_reg(ToolSpec(
+    "canvas_present", "canvas", "Present an artifact beside chat",
+    "Open the chat canvas panel with a web page, image, video, markdown, HTML, "
+    "or document for the user to view. Use when the deliverable is better as a "
+    "standalone visual artifact than inline chat text. Provide src (http URL or "
+    "/api/media/…), content (markdown/html text), or path (workspace file).",
+    _props(
+        kind={**_CANVAS_KIND, "_req": True},
+        title=_str("Short title shown in the panel header"),
+        src=_str("URL, /api/media/…, or /api/canvas/… to display"),
+        content=_str("Inline markdown or HTML body"),
+        path=_str("Workspace-relative or absolute file to preview"),
+        id=_str("Stable id to update later with canvas_update"),
+        open=_bool("Expand the panel (default true)", **{"default": True}),
+    ),
+    _canvas_present_handler,
+    keywords="preview panel artifact viewer iframe webpage image video document markdown html",
+))
+_reg(ToolSpec(
+    "canvas_update", "canvas", "Update a canvas artifact",
+    "Replace content of an existing canvas artifact by id (same kinds as canvas_present).",
+    _props(
+        id=_str("Canvas artifact id from canvas_present", req=True),
+        kind=_CANVAS_KIND,
+        title=_str("Updated title"),
+        src=_str("Updated URL or media src"),
+        content=_str("Updated markdown/HTML body"),
+        path=_str("Updated file path"),
+        open=_bool("Keep panel open", **{"default": True}),
+    ),
+    _canvas_update_handler,
+    keywords="preview panel artifact refresh",
+))
+_reg(ToolSpec(
+    "canvas_close", "canvas", "Close the canvas panel",
+    "Collapse the canvas side panel. Optionally pass id of the artifact to close.",
+    _props(id=_str("Optional artifact id")),
+    _canvas_close_handler,
+    keywords="hide dismiss panel",
+))
+_reg(ToolSpec(
+    "canvas_list", "canvas", "List open canvas artifacts",
+    "List artifacts currently tracked for this turn.",
+    _OBJ,
+    _canvas_list_handler,
+))
 
 # ── agents (specialized sub-agents) ───────────────────────────────────
 def _list_agents_handler(cfg: dict, args: dict):
@@ -524,6 +605,93 @@ _reg(ToolSpec(
 ))
 
 
+# ── MCP server management ─────────────────────────────────────────────
+def _list_mcp_handler(cfg: dict, args: dict):
+    from .mcp_bridge import handle_list_mcp_servers
+    return handle_list_mcp_servers(cfg, args)
+
+def _add_mcp_handler(cfg: dict, args: dict):
+    from .mcp_bridge import handle_add_mcp_server
+    return handle_add_mcp_server(cfg, args)
+
+def _set_mcp_handler(cfg: dict, args: dict):
+    from .mcp_bridge import handle_set_mcp_server
+    return handle_set_mcp_server(cfg, args)
+
+def _remove_mcp_handler(cfg: dict, args: dict):
+    from .mcp_bridge import handle_remove_mcp_server
+    return handle_remove_mcp_server(cfg, args)
+
+def _reload_mcp_handler(cfg: dict, args: dict):
+    from .mcp_bridge import handle_reload_mcp
+    return handle_reload_mcp(cfg, args)
+
+_reg(ToolSpec(
+    "list_mcp_servers", "mcp", "List MCP servers",
+    "List configured Model Context Protocol servers and which tools they currently expose.",
+    _OBJ,
+    _list_mcp_handler,
+    risk="low",
+    discovery=True,
+    keywords="mcp manage servers",
+))
+_reg(ToolSpec(
+    "add_mcp_server", "mcp", "Add an MCP server",
+    "Persist a new MCP server (stdio/sse/http), save config, and sync its tools into the catalog. "
+    "High risk: stdio runs a local process; remote transports connect outbound. "
+    "Then search_tools / activate_tools for mcp_<server>__* names.",
+    _props(
+        name=_str("Short server name", req=True),
+        transport=_str("stdio | sse | http", **{"default": "stdio"}),
+        command=_str("Executable for stdio (e.g. npx, uvx, python)"),
+        args={"type": "array", "items": {"type": "string"}, "description": "stdio args"},
+        url=_str("URL for sse/http transports"),
+        enabled=_bool("Start enabled", **{"default": True}),
+        env={"type": "object", "description": "Optional env vars for stdio (secrets stay in config)"},
+    ),
+    _add_mcp_handler,
+    risk="high",
+    discovery=True,
+    keywords="mcp install add connect server",
+))
+_reg(ToolSpec(
+    "set_mcp_server", "mcp", "Update an MCP server",
+    "Update an MCP server by id or name (enable/disable, command, url, args). Saves config and re-syncs.",
+    _props(
+        id=_str("Server id"),
+        name=_str("Server name (lookup and/or rename)"),
+        transport=_str("stdio | sse | http"),
+        command=_str("stdio command"),
+        args={"type": "array", "items": {"type": "string"}, "description": "stdio args"},
+        url=_str("sse/http url"),
+        enabled=_bool("Enable or disable"),
+        env={"type": "object", "description": "Replace env map (omit to keep)"},
+    ),
+    _set_mcp_handler,
+    risk="high",
+    discovery=True,
+    keywords="mcp update enable disable",
+))
+_reg(ToolSpec(
+    "remove_mcp_server", "mcp", "Remove an MCP server",
+    "Remove an MCP server from config by id or name and drop its tools from the catalog.",
+    _props(id=_str("Server id"), name=_str("Server name")),
+    _remove_mcp_handler,
+    risk="high",
+    discovery=True,
+    keywords="mcp uninstall delete remove",
+))
+_reg(ToolSpec(
+    "reload_mcp", "mcp", "Reload MCP tools",
+    "Force re-connect to all enabled MCP servers and refresh their tool schemas.",
+    _OBJ,
+    _reload_mcp_handler,
+    risk="medium",
+    discovery=True,
+    keywords="mcp sync refresh reconnect",
+))
+
+
 def get_tool(name: str) -> ToolSpec | None:
     return TOOLS.get(name)
 
@@ -592,6 +760,16 @@ def catalog_public(cfg: dict | None = None) -> dict:
         lc_status = lambda: {"langchain": False, "langgraph": False, "crewai": False}  # noqa: E731
         public_builtin_configs = lambda _c=None: {}  # noqa: E731
 
+    mcp_status: dict[str, Any] = {"mcp": False}
+    mcp_servers: list = []
+    try:
+        from .mcp_bridge import status as mcp_stat, servers_public, mcp_group_enabled
+        mcp_status = mcp_stat()
+        if cfg is not None:
+            mcp_servers = servers_public(cfg)
+    except Exception:
+        mcp_group_enabled = lambda _c: False  # noqa: E731
+
     tools_cfg = (cfg or {}).get("tools") or {}
     groups_cfg = tools_cfg.get("groups") or {}
     disabled = set(tools_cfg.get("disabled") or [])
@@ -601,6 +779,8 @@ def catalog_public(cfg: dict | None = None) -> dict:
             enabled = True
         elif gid.startswith("lc_") or gid == "crewai":
             enabled = bool(groups_cfg.get(gid, False))
+        elif gid == "mcp":
+            enabled = bool(groups_cfg.get(gid, mcp_group_enabled(cfg or {})))
         else:
             enabled = bool(groups_cfg.get(gid, gid != "web"))
         members = [t for t in TOOLS.values() if t.group == gid]
@@ -620,6 +800,7 @@ def catalog_public(cfg: dict | None = None) -> dict:
                 for t in members
             ],
         })
+    integrations = {**lc_status(), **mcp_status}
     return {
         "enabled": bool(tools_cfg.get("enabled", True)),
         "discovery": bool(tools_cfg.get("discovery", True)),
@@ -627,7 +808,8 @@ def catalog_public(cfg: dict | None = None) -> dict:
         "max_activated": int(tools_cfg.get("max_activated", 8)),
         "groups": groups_out,
         "packs": packs_public(cfg),
-        "integrations": lc_status(),
+        "integrations": integrations,
+        "mcp_servers": mcp_servers,
         "packs_config": tools_cfg.get("packs") or {},
         "builtin_configs": public_builtin_configs(cfg) if cfg is not None else {},
     }
@@ -652,6 +834,8 @@ def default_tools_config() -> dict:
             "agents": True,
             "capabilities": True,
             "intelligence": True,
+            "mcp": True,
+            "canvas": True,
         },
         "disabled": [],
         "packs": default_packs_config(),

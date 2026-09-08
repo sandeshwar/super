@@ -202,6 +202,13 @@ class ApiService implements IApiService {
     if (title.length > 120) title = title.slice(0, 120);
     return http.request<{ id: string }>('/api/sessions', 'POST', { title });
   }
+  pendingApprovals() {
+    return http.request<{ approvals: import('./types').ApprovalRequest[]; count: number }>('/api/approvals', 'GET');
+  }
+  cancelChat(sessionId: string) {
+    requireId(sessionId);
+    return http.request<{ ok: boolean; cancelled: boolean }>('/api/chat/cancel', 'POST', { session_id: sessionId });
+  }
   prove(id: string, proof: string) {
     requireId(id);
     requireNonEmpty(proof, 'proof');

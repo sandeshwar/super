@@ -38,6 +38,11 @@ export const VIEW_META: Record<View, { title: string; desc: string; icon: 'chat'
     desc: 'Model, look, tools, and connections',
     icon: 'settings',
   },
+  canvas: {
+    title: 'Canvas',
+    desc: 'Detached artifact viewer',
+    icon: 'chat',
+  },
 };
 
 export const FILTER_LABEL: Record<string, string> = {

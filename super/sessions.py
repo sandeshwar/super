@@ -96,6 +96,11 @@ def append(
     gate: dict | None = None,
     tools: list | None = None,
     children: list | None = None,
+    approvals: list | None = None,
+    thinking: str | None = None,
+    media: list | None = None,
+    thoughts: list | None = None,
+    blocks: list | None = None,
 ) -> dict:
     if role not in ("user", "assistant", "system"):
         raise StoreError(f"invalid role {role}")
@@ -109,13 +114,11 @@ def append(
     if len(s["messages"]) >= MAX_MESSAGES_PER_SESSION:
         # Compact: drop oldest user/assistant pair, keep provenance.
         s["messages"] = s["messages"][2:]
-    msg = {"role": role, "content": content, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    if gate is not None:
-        msg["gate"] = gate
+
+    clean_tools = None
     if tools:
-        # Cap persisted tool trace size (UI already truncates display).
-        clean = []
-        for t in tools[:40]:
+        clean_tools = []
+        for t in tools[:80]:
             if not isinstance(t, dict):
                 continue
             row = {
@@ -129,9 +132,145 @@ def append(
             content_t = t.get("content")
             if isinstance(content_t, str) and content_t:
                 row["content"] = content_t[:2000]
-            clean.append(row)
-        if clean:
-            msg["tools"] = clean
+            media_t = t.get("media")
+            if isinstance(media_t, list) and media_t:
+                try:
+                    from . import media as _media
+                    row["media"] = [
+                        _media.public_part(p) for p in media_t[:12] if isinstance(p, dict)
+                    ]
+                except Exception:
+                    row["media"] = [p for p in media_t[:12] if isinstance(p, dict) and p.get("src")]
+            canvas_t = t.get("canvas")
+            if isinstance(canvas_t, dict):
+                try:
+                    from . import canvas as _canvas
+                    pub = _canvas.public_part(canvas_t)
+                    if pub:
+                        row["canvas"] = pub
+                except Exception:
+                    if canvas_t.get("id"):
+                        row["canvas"] = canvas_t
+            clean_tools.append(row)
+
+    msg_media = list(media) if isinstance(media, list) else []
+    if role == "assistant":
+        try:
+            from . import media as _media
+            content, collected = _media.collect_message_media(
+                cfg, content=content, tools=clean_tools, extra=msg_media,
+            )
+            content = content[:MAX_MESSAGE_CHARS]
+            msg_media = collected
+        except Exception:
+            pass
+
+    msg = {"role": role, "content": content, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    clean_thoughts: list[str] = []
+    clean_blocks: list[dict] = []
+    if role == "assistant":
+        if isinstance(blocks, list):
+            for b in blocks[:80]:
+                if not isinstance(b, dict):
+                    continue
+                kind = str(b.get("kind") or "")
+                if kind == "thinking":
+                    text = str(b.get("text") or "")[:MAX_MESSAGE_CHARS]
+                    if not text.strip():
+                        continue
+                    clean_blocks.append({
+                        "kind": "thinking",
+                        "text": text,
+                        **({"step": b["step"]} if isinstance(b.get("step"), int) else {}),
+                    })
+                    clean_thoughts.append(text)
+                elif kind == "text":
+                    text = str(b.get("text") or "")[:MAX_MESSAGE_CHARS]
+                    if not text.strip():
+                        continue
+                    clean_blocks.append({
+                        "kind": "text",
+                        "text": text,
+                        **({"step": b["step"]} if isinstance(b.get("step"), int) else {}),
+                    })
+                elif kind == "media":
+                    media_b = b.get("media")
+                    if not isinstance(media_b, list) or not media_b:
+                        continue
+                    try:
+                        from . import media as _media
+                        parts = [_media.public_part(p) for p in media_b[:12] if isinstance(p, dict)]
+                    except Exception:
+                        parts = [p for p in media_b[:12] if isinstance(p, dict) and p.get("src")]
+                    if parts:
+                        row_b: dict = {"kind": "media", "media": parts}
+                        if isinstance(b.get("step"), int):
+                            row_b["step"] = b["step"]
+                        if isinstance(b.get("tool"), str) and b["tool"]:
+                            row_b["tool"] = b["tool"][:80]
+                        clean_blocks.append(row_b)
+                elif kind == "canvas":
+                    canvas_b = b.get("canvas")
+                    if not isinstance(canvas_b, dict):
+                        continue
+                    try:
+                        from . import canvas as _canvas
+                        pub = _canvas.public_part(canvas_b)
+                    except Exception:
+                        pub = canvas_b if canvas_b.get("id") else None
+                    if pub:
+                        row_b = {"kind": "canvas", "canvas": pub}
+                        if isinstance(b.get("step"), int):
+                            row_b["step"] = b["step"]
+                        if isinstance(b.get("tool"), str) and b["tool"]:
+                            row_b["tool"] = b["tool"][:80]
+                        clean_blocks.append(row_b)
+        if isinstance(thoughts, list) and not clean_thoughts:
+            for t in thoughts[:40]:
+                if isinstance(t, str) and t.strip():
+                    clean_thoughts.append(t[:MAX_MESSAGE_CHARS])
+        if not clean_thoughts and thinking:
+            clean_thoughts = [thinking[:MAX_MESSAGE_CHARS]]
+        if clean_blocks:
+            msg["blocks"] = clean_blocks
+            # Prefer joined text blocks as content when caller only sent final reply
+            joined_text = "\n\n".join(
+                str(b.get("text") or "") for b in clean_blocks if b.get("kind") == "text"
+            ).strip()
+            if joined_text:
+                msg["content"] = joined_text[:MAX_MESSAGE_CHARS]
+                content = msg["content"]
+        if clean_thoughts:
+            msg["thoughts"] = clean_thoughts
+            msg["thinking"] = "\n\n".join(clean_thoughts)[:MAX_MESSAGE_CHARS]
+        elif thinking:
+            msg["thinking"] = str(thinking)[:MAX_MESSAGE_CHARS]
+    if msg_media and role == "assistant":
+        try:
+            from . import media as _media
+            msg["media"] = [_media.public_part(p) for p in msg_media[:24] if isinstance(p, dict)]
+        except Exception:
+            msg["media"] = [p for p in msg_media[:24] if isinstance(p, dict) and p.get("src")]
+    if role == "assistant":
+        # Aggregate canvas artifacts from blocks + tools onto the message.
+        canvas_by_id: dict[str, dict] = {}
+        for b in clean_blocks:
+            if b.get("kind") == "canvas" and isinstance(b.get("canvas"), dict):
+                c = b["canvas"]
+                cid = str(c.get("id") or "")
+                if cid:
+                    canvas_by_id[cid] = c
+        if clean_tools:
+            for t in clean_tools:
+                c = t.get("canvas") if isinstance(t, dict) else None
+                if isinstance(c, dict) and c.get("id"):
+                    canvas_by_id[str(c["id"])] = c
+        if canvas_by_id:
+            msg["canvas"] = list(canvas_by_id.values())[:24]
+    if gate is not None:
+        msg["gate"] = gate
+    if clean_tools:
+        msg["tools"] = clean_tools
     if children:
         clean_c = []
         for c in children[:20]:
@@ -150,6 +289,21 @@ def append(
             })
         if clean_c:
             msg["children"] = clean_c
+    if approvals:
+        clean_a = []
+        for a in approvals[:20]:
+            if not isinstance(a, dict) or not a.get("kind") or a.get("id") is None:
+                continue
+            clean_a.append({
+                "kind": str(a.get("kind"))[:24],
+                "id": a.get("id") if isinstance(a.get("id"), int) else str(a.get("id"))[:40],
+                "title": str(a.get("title") or "")[:160],
+                "detail": str(a.get("detail") or "")[:240],
+                "status": str(a.get("status") or "pending")[:16],
+                "meta": a.get("meta") if isinstance(a.get("meta"), dict) else {},
+            })
+        if clean_a:
+            msg["approvals"] = clean_a
     s["messages"].append(msg)
     s["updated"] = msg["ts"]
     if len(s["messages"]) == 1 and role == "user" and s["title"] == "New chat":

@@ -14,7 +14,7 @@ function fmtMs(n?: number) {
 }
 
 /** Slim context + provider timing (prefill / decode TPS). */
-export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, busy }: {
+export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats }: {
   tokenStats: { total: number; limit: number | null; pct: number | null };
   leaf: TaskNode | null;
   messagesLen: number;
@@ -50,7 +50,6 @@ export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, busy
             )}
             {leaf?.id ? <span className="mono">task {leaf.id}</span> : null}
             {cost ? <span className="mono">~{cost.total} tok</span> : null}
-            {busy && !decode ? <span className="mono">gen…</span> : null}
           </>
         }
       >

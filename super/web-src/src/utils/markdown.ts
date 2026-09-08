@@ -12,7 +12,12 @@ function inline(s: string): string {
   // bold + italic
   html = html.replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/(^|[^*\w])\*([^*\n]+?)\*/g, '$1<em>$2</em>');
-  // links [text](url)
+  // images before links — otherwise ![alt](url) loses the bang to the link rule
+  html = html.replace(
+    /!\[([^\]]*?)\]\(((?:https?:\/\/[^)\s]+|data:image\/[^)\s]+|\/api\/media\/[^)\s]+))\)/g,
+    (_, alt, src) => `<img class="md-img" src="${esc(src)}" alt="${esc(alt)}" loading="lazy" />`,
+  );
+  // links [text](url) — http(s) only
   html = html.replace(/\[([^\]]+?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
   return html;
 }

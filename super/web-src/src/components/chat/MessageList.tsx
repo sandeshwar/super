@@ -21,13 +21,14 @@ type Props = {
   onSetInput: (v: string) => void;
   onSendSuggestion?: (v: string) => void;
   onClearError: () => void;
+  onApprovalsChange?: (idx: number, approvals: import('../../types').ApprovalRequest[]) => void;
   bottomRef: React.RefObject<HTMLDivElement | null>;
 };
 
 export function MessageList({
   messages, busy, error, editingIdx, editDraft, setEditDraft, setEditingIdx,
   onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop,
-  onSetInput, onSendSuggestion, onClearError, bottomRef,
+  onSetInput, onSendSuggestion, onClearError, onApprovalsChange, bottomRef,
 }: Props) {
   return (
     <div className="message-list" aria-live="polite" aria-relevant="additions text">
@@ -40,7 +41,7 @@ export function MessageList({
         )}
         {messages.map((m, i) => (
           <MessageItem
-            key={`${m.role}-${m.ts}-${i}-${m.content.length}`}
+            key={`${m.role}-${m.ts}-${i}`}
             message={m}
             index={i}
             busy={busy}
@@ -55,6 +56,7 @@ export function MessageList({
             onBranch={onBranch}
             onRegenerate={onRegenerate}
             onStop={onStop}
+            onApprovalsChange={onApprovalsChange}
           />
         ))}
         {error && (

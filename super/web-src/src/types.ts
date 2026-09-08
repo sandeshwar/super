@@ -26,12 +26,63 @@ export interface GateInfo {
   };
 }
 
+export interface MediaPart {
+  kind?: 'image' | string;
+  id?: string;
+  /** data: URL, http(s), or /api/media/<id> */
+  src: string;
+  mime?: string;
+  alt?: string;
+  bytes?: number;
+  source?: string;
+  path?: string;
+}
+
+/** Agent-presented artifact for the side canvas panel. */
+export interface CanvasPart {
+  id: string;
+  action?: 'present' | 'update' | 'close' | string;
+  kind: 'url' | 'image' | 'video' | 'markdown' | 'html' | 'file' | 'doc' | string;
+  title?: string;
+  src?: string;
+  content?: string;
+  mime?: string;
+  path?: string;
+  alt?: string;
+  bytes?: number;
+  open?: boolean;
+  detachable?: boolean;
+  content_truncated?: boolean;
+  /** False when X-Frame-Options / CSP blocks iframe embed. */
+  embeddable?: boolean;
+  embed_note?: string;
+}
+
+/** Chronological assistant-turn timeline (think → text → media → …). */
+export type ChatBlock =
+  | { kind: 'thinking'; text: string; step?: number }
+  | { kind: 'text'; text: string; step?: number }
+  | { kind: 'media'; media: MediaPart[]; step?: number; tool?: string }
+  | { kind: 'canvas'; canvas: CanvasPart; step?: number; tool?: string };
+
 export interface ToolEvent {
   kind: 'call' | 'result';
   name: string;
   ok?: boolean;
   arguments?: unknown;
   content?: string;
+  media?: MediaPart[];
+  canvas?: CanvasPart;
+}
+
+/** Human approval request attached to an assistant turn (agents/caps/memory). */
+export interface ApprovalRequest {
+  kind: 'agent' | 'capability' | 'memory' | string;
+  id: string | number;
+  title: string;
+  detail?: string;
+  status?: 'pending' | 'approved' | 'rejected' | 'confirmed' | string;
+  meta?: Record<string, unknown>;
 }
 
 /** Child specialist span shown in parent chat + session list. */
@@ -57,10 +108,23 @@ export interface ChildSpan {
 export interface ChatMessage {
   role: string;
   content: string;
+  /** Model reasoning trace (Ollama thinking / &lt;think&gt;), separate from content. */
+  thinking?: string;
+  /** Per ReAct-step reasoning blocks (preferred over a single joined `thinking`). */
+  thoughts?: string[];
+  /** Stream-only: latest thought block is still receiving tokens. */
+  thinkingLive?: boolean;
+  /** Chronological think/text/media timeline for this turn. */
+  blocks?: ChatBlock[];
+  /** Normalized images (and future media) for album rendering. */
+  media?: MediaPart[];
+  /** Latest canvas artifacts presented during this turn. */
+  canvas?: CanvasPart[];
   ts: string;
   gate?: GateInfo;
   tools?: ToolEvent[];
   children?: ChildSpan[];
+  approvals?: ApprovalRequest[];
 }
 
 export interface Session {
@@ -73,6 +137,8 @@ export interface Session {
   span_id?: string | null;
   agent_id?: string | null;
   kind?: string;
+  /** True while a server-side completion is still running (survives tab close). */
+  generating?: boolean;
 }
 
 export interface SessionSummary {
@@ -83,6 +149,7 @@ export interface SessionSummary {
   kind?: string;
   spans?: ChildSpan[];
   parent?: string | null;
+  generating?: boolean;
 }
 
 export interface TaskNode {

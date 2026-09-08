@@ -29,7 +29,7 @@ type Props = {
 };
 
 export function SessionsPanel({
-  sessions, filtered, activeId, parentId, activeSpanId, filter, busy,
+  sessions, filtered, activeId, parentId, activeSpanId, filter,
   selectMode, selectedIds,
   onFilter, onNewChat, onSelect, onSelectSpan, onDelete, onRename,
   onToggleSelectMode, onToggleSelected, onSelectAllFiltered, onClearSelection, onDeleteSelected,
@@ -103,10 +103,6 @@ export function SessionsPanel({
 
       <div className="sessions-panel-foot panel-foot">
         <span className="mono">{sessions.length} chat{sessions.length !== 1 ? 's' : ''}{nSel ? ` · ${nSel} selected` : ''}</span>
-        <span className="sessions-panel-status">
-          <span className="dot" style={{ background: busy ? 'var(--yellow)' : 'var(--green)' }} aria-hidden />
-          {busy ? 'writing…' : 'ready'}
-        </span>
       </div>
     </Card>
   );

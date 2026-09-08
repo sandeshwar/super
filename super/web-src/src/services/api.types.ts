@@ -21,6 +21,7 @@ export interface ISessionService {
   sessions(): Promise<{ sessions: SessionSummary[] }>;
   session(id: string): Promise<Session>;
   createSession(title?: string): Promise<{ id: string }>;
+  cancelChat(sessionId: string): Promise<{ ok: boolean; cancelled: boolean }>;
 }
 export type StreamChatOpts = {
   signal?: AbortSignal;
@@ -98,6 +99,30 @@ export interface IMemoryService {
   supersedeMemory(id: number, replacement: string): Promise<{ ok: boolean; claim: MemoryClaim }>;
   retireMemory(id: number): Promise<{ ok: boolean; claim: MemoryClaim }>;
 }
+export type AgendaItem = {
+  id: string;
+  kind: string;
+  priority: string;
+  status: string;
+  title: string;
+  detail?: string;
+  action?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  result?: unknown;
+};
+export interface ICapabilitiesService {
+  listCapabilities(includeRetired?: boolean): Promise<{ capabilities: CapabilitySpec[] }>;
+  approveCapability(id: string): Promise<{ ok: boolean; capability: CapabilitySpec }>;
+  rejectCapability(id: string, reason?: string): Promise<{ ok: boolean; capability: CapabilitySpec }>;
+  retireCapability(id: string): Promise<{ ok: boolean; capability: CapabilitySpec }>;
+}
+export interface IIntelligenceService {
+  getIntelligence(includeDone?: boolean): Promise<{ agenda: AgendaItem[]; stats: Record<string, unknown>; briefing: string }>;
+  tickIntelligence(force?: boolean): Promise<{ ok: boolean; refresh?: unknown; auto_act?: unknown; briefing?: string }>;
+  pursueAgenda(id?: string): Promise<{ ok: boolean; item?: AgendaItem; result?: unknown; needs_model?: boolean; guidance?: string }>;
+  dismissAgenda(id: string, reason?: string): Promise<{ ok: boolean; item: AgendaItem }>;
+}
 export interface ISecurityService {
   sbom(): Promise<{ packages: { name: string; version: string }[]; count: number }>;
   sink(): Promise<{ entries: number; violations: unknown[]; clean: boolean }>;
@@ -132,4 +157,4 @@ export interface IChatEditService {
   editMessage(id: string, idx: number, content: string): Promise<{ ok: boolean }>;
   leaf(): Promise<{ leaf: import('../types').TaskNode | null; rendered: string }>;
 }
-export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService & IMemoryService;
+export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService & IMemoryService & ICapabilitiesService & IIntelligenceService;

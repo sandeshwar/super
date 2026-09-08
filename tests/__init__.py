@@ -10,7 +10,7 @@ def make_cfg(**over):
     root = tempfile.mkdtemp(prefix="super-test-")
     state = os.path.join(root, ".super")
     cfg = json.loads(json.dumps(C.DEFAULTS))
-    cfg["_config_path"] = None
+    cfg["_config_path"] = os.path.join(root, "super.config.json")
     cfg["_root"] = root
     cfg["state_dir"] = state
     cfg["envelope"]["best_of_n"] = 1

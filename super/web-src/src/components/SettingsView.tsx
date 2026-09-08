@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type AgentSpec, type AgendaItem, type CapabilitySpec, type MemoryClaim } from '../api';
 import { userMessage } from '../lib/errors';
 import { useAppearance, type Density, type Theme } from '../hooks/useTheme';
@@ -55,7 +55,7 @@ const SECURITY_META: Record<string, { label: string; desc: string }> = {
 };
 
 type PublicConfig = {
-  llm: { endpoint: string; model: string; timeout_s: number; retries: number; health_path: string };
+  llm: { endpoint: string; model: string; timeout_s: number; retries: number; health_path: string; think?: boolean | string };
   envelope: { max_microtask_lines: number; best_of_n: number; max_steps_per_task: number; early_abort_stall: number };
   gates: Record<string, boolean>;
   security: Record<string, boolean>;
@@ -121,8 +121,9 @@ type ToolCatalog = {
   max_activated: number;
   groups: ToolCatalogGroup[];
   packs?: ToolPack[];
-  integrations?: { langchain?: boolean; langgraph?: boolean; crewai?: boolean };
+  integrations?: { langchain?: boolean; langgraph?: boolean; crewai?: boolean; mcp?: boolean };
   builtin_configs?: Record<string, ConfigField[]>;
+  mcp_servers?: { id?: string; name?: string; transport?: string; enabled?: boolean; loaded?: boolean; tool_count?: number; tools?: string[] }[];
 };
 
 export type McpServer = {
@@ -438,6 +439,13 @@ function ModelSection({
             <label htmlFor="llm-health">Health path</label>
             <Input id="llm-health" value={draft.health_path} onChange={(e) => setDraft({ ...draft, health_path: e.target.value })} placeholder="/api/tags" />
           </div>
+          <Switch
+            id="llm-think"
+            checked={draft.think !== false && draft.think !== 'false'}
+            onChange={(v) => setDraft({ ...draft, think: v })}
+            label="Show thinking"
+            description="Stream the model's reasoning into a collapsible Thought card (Qwen / DeepSeek / etc.)"
+          />
           <div className="row">
             <Button variant="primary" disabled={saving} onClick={() => onSaveLlm({ ...draft, model: model || draft.model })}>
               Save connection
@@ -526,6 +534,7 @@ function MemorySection({
   const [q, setQ] = useState('');
   const [draft, setDraft] = useState('');
   const [includeDead, setIncludeDead] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [replaceId, setReplaceId] = useState<number | null>(null);
   const [replaceText, setReplaceText] = useState('');
@@ -543,6 +552,13 @@ function MemorySection({
   }, [q, includeDead, onError]);
 
   useEffect(() => { void reload(q); }, [includeDead]); // eslint-disable-line react-hooks/exhaustive-deps — toggle only; search is explicit
+
+  const visibleClaims = useMemo(
+    () => (showAll || includeDead || q.trim()
+      ? claims
+      : claims.filter((c) => (c.verification || 'unverified') === 'unverified')),
+    [claims, showAll, includeDead, q],
+  );
 
   const add = async () => {
     const text = draft.trim();
@@ -584,8 +600,15 @@ function MemorySection({
       </Card>
 
       <Card>
-        <CardHead>Claims ({total})</CardHead>
+        <CardHead>
+          {showAll || includeDead || q.trim()
+            ? `Claims (${total})`
+            : `Needs confirm (${visibleClaims.length})`}
+        </CardHead>
         <CardBody>
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Approvals should land in chat first. This list is the backlog of unverified claims that went unacked.
+          </p>
           <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
             <Input
               value={q}
@@ -596,13 +619,21 @@ function MemorySection({
             />
             <Button size="sm" onClick={() => void reload(q)}>Search</Button>
             <label className="small muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+              Show all
+            </label>
+            <label className="small muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={includeDead} onChange={(e) => setIncludeDead(e.target.checked)} />
               Show retired
             </label>
           </div>
-          {claims.length === 0 && <p className="small muted">No claims yet — prove a task, run a web search, or add one above.</p>}
+          {visibleClaims.length === 0 && (
+            <p className="small muted">
+              {showAll ? 'No claims yet — prove a task, run a web search, or add one above.' : 'Nothing waiting — chat cards handle confirms as they appear.'}
+            </p>
+          )}
           <div className="col-stack">
-            {claims.map((c) => (
+            {visibleClaims.map((c) => (
               <div key={c.id} className="agent-row">
                 <div className="agent-row-body">
                   <div style={{ fontWeight: 500 }}>{c.text}</div>
@@ -671,6 +702,7 @@ function AgentsSection({
   const [caps, setCaps] = useState<CapabilitySpec[]>([]);
   const [agenda, setAgenda] = useState<AgendaItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('worker');
   const [summary, setSummary] = useState('');
@@ -694,6 +726,11 @@ function AgentsSection({
   }, [onError]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  const pendingAgents = useMemo(() => agents.filter((a) => a.status === 'pending'), [agents]);
+  const pendingCaps = useMemo(() => caps.filter((c) => c.status === 'pending'), [caps]);
+  const visibleAgents = showAll ? agents : pendingAgents;
+  const visibleCaps = showAll ? caps : pendingCaps;
 
   const create = async () => {
     setBusy(true);
@@ -768,7 +805,7 @@ function AgentsSection({
         <CardBody>
           <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
             Specs are CRUD resources. Children inherit parent tools/gates/budgets (can only tighten).
-            Judge roles created by the main agent stay pending until you approve them here.
+            Judge roles created by the main agent ask for approval in chat (backlog here if unacked).
           </p>
           <div style={{ display: 'grid', gap: 'var(--space-2)', maxWidth: 520 }}>
             <label>
@@ -801,11 +838,23 @@ function AgentsSection({
       </Card>
 
       <Card>
-        <CardHead>Registry ({agents.filter((a) => a.status !== 'archived').length} active)</CardHead>
+        <CardHead>
+          Needs approval ({pendingAgents.length + pendingCaps.length})
+          <label className="small muted" style={{ marginLeft: 12, display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 400 }}>
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+            Show full registry
+          </label>
+        </CardHead>
         <CardBody>
-          {agents.length === 0 && <p className="small muted">No agents yet — create one or let the main agent use create_agent.</p>}
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Approve in the chat card when the agent asks. This list is only the unacked backlog
+            (pending agents + pending forged capabilities).
+          </p>
+          {pendingAgents.length + pendingCaps.length === 0 && !showAll && (
+            <p className="small muted">Nothing waiting — chat surfaces approvals as they appear.</p>
+          )}
           <div className="col-stack">
-            {agents.map((a) => (
+            {visibleAgents.map((a) => (
               <div
                 key={a.id}
                 className="agent-row"
@@ -831,23 +880,7 @@ function AgentsSection({
                 </div>
               </div>
             ))}
-          </div>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHead>
-          Capability forge ({caps.filter((c) => c.status === 'installed').length} installed
-          {caps.some((c) => c.status === 'pending') ? `, ${caps.filter((c) => c.status === 'pending').length} pending` : ''})
-        </CardHead>
-        <CardBody>
-          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
-            Agent-invented tools (composites of existing tools, or HTTP). Low-risk composites auto-install;
-            medium/high stay pending until you approve.
-          </p>
-          {caps.length === 0 && <p className="small muted">No forged capabilities yet — the agent uses propose_capability.</p>}
-          <div className="col-stack">
-            {caps.map((c) => (
+            {visibleCaps.map((c) => (
               <div
                 key={c.id}
                 className="agent-row"
@@ -877,7 +910,7 @@ function AgentsSection({
                       </Button>
                     </>
                   )}
-                  {c.status === 'installed' && (
+                  {c.status === 'installed' && showAll && (
                     <Button size="sm" variant="ghost" onClick={() => void api.retireCapability(c.id).then(reload).catch((e) => onError(userMessage(e)))}>
                       Retire
                     </Button>
@@ -922,22 +955,38 @@ function ToolsSection({
   });
   const [toolQuery, setToolQuery] = useState('');
   const [openPack, setOpenPack] = useState<string | null>(null);
+  // Unsaved group/pack edits must survive gate/envelope saves that refresh cfg.tools.
+  const toolsDirty = useRef(false);
+
+  const syncDraftFromServer = (src: AgentToolsConfig) => ({
+    enabled: src.enabled !== false,
+    discovery: src.discovery !== false,
+    max_result_chars: src.max_result_chars || 8000,
+    max_activated: src.max_activated || 8,
+    groups: { ...(src.groups || {}) },
+    disabled: [...(src.disabled || [])],
+    packs: { ...(src.packs || {}) },
+    pack_config: { ...(src.pack_config || {}) },
+    builtin_config: { ...(src.builtin_config || {}) },
+    runtime: src.runtime || 'auto',
+  });
 
   useEffect(() => { setEnvDraft(envelope); }, [envelope]);
   useEffect(() => {
-    if (agentTools) setDraft({
-      enabled: agentTools.enabled !== false,
-      discovery: agentTools.discovery !== false,
-      max_result_chars: agentTools.max_result_chars || 8000,
-      max_activated: agentTools.max_activated || 8,
-      groups: { ...(agentTools.groups || {}) },
-      disabled: [...(agentTools.disabled || [])],
-      packs: { ...(agentTools.packs || {}) },
-      pack_config: { ...(agentTools.pack_config || {}) },
-      builtin_config: { ...(agentTools.builtin_config || {}) },
-      runtime: agentTools.runtime || 'auto',
-    });
+    if (!agentTools || toolsDirty.current) return;
+    setDraft(syncDraftFromServer(agentTools));
   }, [agentTools]);
+
+  const patchDraft = (updater: (d: AgentToolsConfig) => AgentToolsConfig) => {
+    toolsDirty.current = true;
+    setDraft(updater);
+  };
+
+  const persistTools = (next: AgentToolsConfig) => {
+    toolsDirty.current = false;
+    setDraft(next);
+    onSaveTools(next);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -988,11 +1037,11 @@ function ToolsSection({
   const disabledSet = useMemo(() => new Set(draft.disabled), [draft.disabled]);
 
   const toggleGroup = (id: string, on: boolean) => {
-    setDraft((d) => ({ ...d, groups: { ...d.groups, [id]: on } }));
+    patchDraft((d) => ({ ...d, groups: { ...d.groups, [id]: on } }));
   };
 
   const toggleTool = (name: string, on: boolean) => {
-    setDraft((d) => {
+    patchDraft((d) => {
       const next = new Set(d.disabled);
       if (on) next.delete(name);
       else next.add(name);
@@ -1006,12 +1055,12 @@ function ToolsSection({
   const q = toolQuery.trim().toLowerCase();
 
   const togglePack = (id: string, on: boolean) => {
-    setDraft((d) => ({ ...d, packs: { ...(d.packs || {}), [id]: on } }));
+    patchDraft((d) => ({ ...d, packs: { ...(d.packs || {}), [id]: on } }));
     if (on) setOpenPack(id);
   };
 
   const setPackField = (packId: string, key: string, value: string | number | boolean) => {
-    setDraft((d) => ({
+    patchDraft((d) => ({
       ...d,
       pack_config: {
         ...(d.pack_config || {}),
@@ -1021,7 +1070,7 @@ function ToolsSection({
   };
 
   const setBuiltinField = (tool: string, key: string, value: string | number | boolean) => {
-    setDraft((d) => ({
+    patchDraft((d) => ({
       ...d,
       builtin_config: {
         ...(d.builtin_config || {}),
@@ -1044,13 +1093,13 @@ function ToolsSection({
         <CardBody className="stack gap-sm">
           <p className="settings-hint" style={{ marginTop: 0 }}>
             The model discovers tools on demand (search → activate → use) so prompts stay small.
-            Turn groups on/off here; individual tools can be disabled inside each group.
+            The master switch saves immediately; group/pack edits need Save below.
           </p>
           <Switch
             id="tools-enabled"
             checked={draft.enabled}
             disabled={saving}
-            onChange={(v) => setDraft((d) => ({ ...d, enabled: v }))}
+            onChange={(v) => persistTools({ ...draft, enabled: v })}
             label="Enable agent tools"
             description="Let the model read files, search, run commands, and more"
           />
@@ -1058,7 +1107,7 @@ function ToolsSection({
             id="tools-discovery"
             checked={draft.discovery}
             disabled={saving || !draft.enabled}
-            onChange={(v) => setDraft((d) => ({ ...d, discovery: v }))}
+            onChange={(v) => persistTools({ ...draft, discovery: v })}
             label="Discover tools as needed"
             description="Only load search/activate helpers at first; pull full schemas when needed"
           />
@@ -1072,7 +1121,7 @@ function ToolsSection({
                 max={40}
                 disabled={!draft.enabled}
                 value={draft.max_activated}
-                onChange={(e) => setDraft((d) => ({ ...d, max_activated: Number(e.target.value) || 1 }))}
+                onChange={(e) => patchDraft((d) => ({ ...d, max_activated: Number(e.target.value) || 1 }))}
               />
             </div>
             <div className="settings-field">
@@ -1084,7 +1133,7 @@ function ToolsSection({
                 max={100000}
                 disabled={!draft.enabled}
                 value={draft.max_result_chars}
-                onChange={(e) => setDraft((d) => ({ ...d, max_result_chars: Number(e.target.value) || 500 }))}
+                onChange={(e) => patchDraft((d) => ({ ...d, max_result_chars: Number(e.target.value) || 500 }))}
               />
             </div>
           </div>
@@ -1154,7 +1203,7 @@ function ToolsSection({
               </div>
             );
           })}
-          <Button variant="primary" disabled={saving || !catalog} onClick={() => onSaveTools(draft)}>Save agent tools</Button>
+          <Button variant="primary" disabled={saving || !catalog} onClick={() => persistTools(draft)}>Save agent tools</Button>
         </CardBody>
       </Card>
 
@@ -1257,14 +1306,14 @@ function ToolsSection({
               id="tools-runtime"
               value={draft.runtime || 'auto'}
               disabled={!draft.enabled}
-              onChange={(e) => setDraft((d) => ({ ...d, runtime: e.target.value as AgentToolsConfig['runtime'] }))}
+              onChange={(e) => patchDraft((d) => ({ ...d, runtime: e.target.value as AgentToolsConfig['runtime'] }))}
             >
               <option value="auto">Auto (LangGraph if installed)</option>
               <option value="stdlib">Built-in loop</option>
               <option value="langgraph">LangGraph ToolNode</option>
             </Select>
           </div>
-          <Button variant="primary" disabled={saving || !catalog} onClick={() => onSaveTools(draft)}>Save packs & config</Button>
+          <Button variant="primary" disabled={saving || !catalog} onClick={() => persistTools(draft)}>Save packs & config</Button>
         </CardBody>
       </Card>
 
@@ -1298,7 +1347,7 @@ function ToolsSection({
               </div>
             </div>
           ))}
-          <Button variant="primary" disabled={saving || !catalog} onClick={() => onSaveTools(draft)}>Save built-in defaults</Button>
+          <Button variant="primary" disabled={saving || !catalog} onClick={() => persistTools(draft)}>Save built-in defaults</Button>
         </CardBody>
       </Card>
 
@@ -1367,6 +1416,17 @@ function emptyServer(): McpServer {
   };
 }
 
+/** Drop fields that don't belong to the selected transport before save. */
+function sanitizeMcpServer(s: McpServer): McpServer {
+  const { has_env: _h, ...rest } = s;
+  if (rest.transport === 'stdio') {
+    const { url: _u, ...out } = rest;
+    return out;
+  }
+  const { command: _c, args: _a, ...out } = rest;
+  return out;
+}
+
 function McpSection({
   servers, saving, onSave,
 }: {
@@ -1375,10 +1435,36 @@ function McpSection({
   onSave: (servers: McpServer[]) => void;
 }) {
   const [draft, setDraft] = useState<McpServer[]>(servers);
+  const [sdk, setSdk] = useState<{ mcp?: boolean; servers?: ToolCatalog['mcp_servers'] } | null>(null);
   useEffect(() => { setDraft(servers.map((s) => ({ ...s, id: s.id || `mcp_${Math.random().toString(36).slice(2, 10)}` }))); }, [servers]);
+  useEffect(() => {
+    let cancelled = false;
+    api.getTools().then((r) => {
+      if (cancelled) return;
+      const cat = r.tools as unknown as ToolCatalog;
+      setSdk({ mcp: cat.integrations?.mcp, servers: cat.mcp_servers });
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, [servers]);
 
   const update = (idx: number, patch: Partial<McpServer>) => {
-    setDraft((list) => list.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+    setDraft((list) => list.map((s, i) => {
+      if (i !== idx) return s;
+      const next = { ...s, ...patch };
+      if (patch.transport === 'stdio') {
+        delete next.url;
+      } else if (patch.transport === 'sse' || patch.transport === 'http') {
+        delete next.command;
+        delete next.args;
+        if (!next.url) next.url = 'http://127.0.0.1:3000/sse';
+      }
+      return next;
+    }));
+  };
+
+  const statusFor = (s: McpServer) => {
+    const rows = sdk?.servers || [];
+    return rows.find((r) => (s.id && r.id === s.id) || r.name === s.name);
   };
 
   return (
@@ -1386,25 +1472,42 @@ function McpSection({
       <Card>
         <CardHead>
           <h3>Servers</h3>
-          <span className="head-meta">{draft.length} configured</span>
+          <span className="head-meta">
+            {draft.length} configured
+            {sdk ? ` · SDK ${sdk.mcp ? 'ready' : 'missing'}` : ''}
+          </span>
         </CardHead>
         <CardBody className="stack gap">
           <p className="settings-hint" style={{ marginTop: 0 }}>
-            Add MCP servers SUPER can call for extra tools. Connection is stored in your config — the runtime uses them when available.
+            Add MCP servers SUPER can call. Enabled servers are probed on save / agent start;
+            their tools appear in the catalog as <code>mcp_&lt;server&gt;__&lt;tool&gt;</code> and
+            follow the same search → describe → activate flow. Requires{" "}
+            <code>pip install -e &apos;.[mcp]&apos;</code>. Tool results are marked untrusted.
           </p>
+          {sdk && sdk.mcp === false && (
+            <p className="settings-hint" style={{ color: 'var(--yellow)' }}>
+              MCP SDK not installed — run <code>pip install -e &apos;.[mcp]&apos;</code> then restart the server.
+            </p>
+          )}
           {draft.length === 0 && (
             <div className="empty" style={{ padding: 'var(--space-4)' }}>
               <p className="small muted">No MCP servers yet</p>
             </div>
           )}
-          {draft.map((s, idx) => (
+          {draft.map((s, idx) => {
+            const st = statusFor(s);
+            return (
             <div key={s.id || idx} className="mcp-card">
               <div className="mcp-card-top">
                 <Switch
                   checked={s.enabled !== false}
                   onChange={(v) => update(idx, { enabled: v })}
                   label={s.name || 'New server'}
-                  description={s.transport === 'stdio' ? (s.command || 'stdio') : (s.url || 'no url')}
+                  description={
+                    st?.loaded
+                      ? `${s.transport === 'stdio' ? (s.command || 'stdio') : (s.url || 'no url')} · ${st.tool_count || 0} tools`
+                      : (s.transport === 'stdio' ? (s.command || 'stdio') : (s.url || 'no url'))
+                  }
                 />
                 <Button size="sm" variant="ghost" onClick={() => setDraft((list) => list.filter((_, i) => i !== idx))}>Remove</Button>
               </div>
@@ -1448,10 +1551,11 @@ function McpSection({
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
           <div className="row gap-sm">
             <Button variant="secondary" onClick={() => setDraft((list) => [...list, emptyServer()])}>Add server</Button>
-            <Button variant="primary" disabled={saving} onClick={() => onSave(draft.map(({ has_env: _h, ...rest }) => rest))}>Save servers</Button>
+            <Button variant="primary" disabled={saving} onClick={() => onSave(draft.map(sanitizeMcpServer))}>Save servers</Button>
           </div>
         </CardBody>
       </Card>

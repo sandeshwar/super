@@ -747,6 +747,7 @@ def can_call_tool(cfg: dict, name: str) -> tuple[bool, str]:
     if name in (
         "propose_capability", "install_capability", "retire_capability",
         "test_capability",
+        "add_mcp_server", "remove_mcp_server", "set_mcp_server", "reload_mcp",
     ) and not eff.get("may_manage_agents", True):
         return False, "agent may_manage_agents=false"
     return True, ""
@@ -1042,7 +1043,7 @@ def handle_create_agent(cfg: dict, args: dict):
         return ToolResult(False, str(e))
     note = None
     if spec.get("status") == "pending":
-        note = "pending human approval before run_agent can use this agent"
+        note = "pending human approval in chat before run_agent can use this agent"
     return ToolResult(True, dump_json({"agent": spec, "note": note}))
 
 

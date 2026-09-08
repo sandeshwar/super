@@ -298,6 +298,7 @@ def git_show(cfg: dict, args: dict) -> ToolResult:
 
 def fetch_url(cfg: dict, args: dict) -> ToolResult:
     from .tool_config import resolve_builtin
+    from .. import net as _net
     bc = resolve_builtin(cfg, "fetch_url")
     url = str(args.get("url") or "").strip()
     if not url.startswith(("http://", "https://")):
@@ -307,8 +308,9 @@ def fetch_url(cfg: dict, args: dict) -> ToolResult:
     max_bytes = max(1000, min(int(bc.get("max_bytes") or 200_000), 2_000_000))
     ua = str(bc.get("user_agent") or "super-harness/1.0")
     try:
+        import urllib.request
         req = urllib.request.Request(url, headers={"User-Agent": ua})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _net.urlopen(req, timeout=timeout) as resp:
             raw = resp.read(max_bytes)
             ctype = resp.headers.get("Content-Type", "")
         text = raw.decode("utf-8", errors="replace")
@@ -391,7 +393,11 @@ def memory_add(cfg: dict, args: dict) -> ToolResult:
         )
     except Exception as e:
         return ToolResult(False, str(e))
-    return ToolResult(True, f"stored claim #{stored.get('id')}: {claim[:200]}")
+    return ToolResult(
+        True,
+        dump_json({"claim": stored, "note": "Unverified — confirm in chat if you trust it"}),
+        data={"id": stored.get("id"), "verification": stored.get("verification")},
+    )
 
 
 def memory_confirm(cfg: dict, args: dict) -> ToolResult:

@@ -163,7 +163,29 @@ def answer(cfg: dict, session_id: str, user_text: str) -> tuple[str, dict]:
                 children = [c for c in children if c.get("run_id") == rid] or children[:4]
         except Exception:
             children = None
-        sessions.append(cfg, session_id, "assistant", reply, gate=gate, tools=events or None, children=children)
+        approvals = []
+        try:
+            from . import approvals as _appr
+            for ev in events or []:
+                if not isinstance(ev, dict) or ev.get("kind") != "result":
+                    continue
+                ap = _appr.from_tool_result(
+                    str(ev.get("name") or ""),
+                    ev.get("content") if isinstance(ev.get("content"), str) else None,
+                    ok=bool(ev.get("ok", True)),
+                )
+                if ap:
+                    approvals.append(ap)
+        except Exception:
+            approvals = []
+        sessions.append(
+            cfg, session_id, "assistant", reply,
+            gate=gate, tools=events or None, children=children,
+            approvals=approvals or None,
+            thinking=(meta.get("thinking") if isinstance(meta, dict) else None) or None,
+            thoughts=(meta.get("thoughts") if isinstance(meta, dict) else None) or None,
+            blocks=(meta.get("blocks") if isinstance(meta, dict) else None) or None,
+        )
         return reply, gate
 
     n = max(1, int(cfg.get("envelope", {}).get("best_of_n", 1)))

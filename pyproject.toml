@@ -8,6 +8,9 @@ version = "1.0.0"
 description = "SUPER production coding harness: gated, provenanced, risk-calibrated agent runtime"
 requires-python = ">=3.10"
 license = { text = "MIT" }
+dependencies = [
+  "certifi>=2024.0.0",
+]
 
 [project.optional-dependencies]
 # LangChain / LangGraph / CrewAI bridge (see super.tools.langchain_bridge)
@@ -19,6 +22,11 @@ agent = [
   "duckduckgo-search>=6.0",
   "wikipedia>=1.4",
   "arxiv>=2.0",
+]
+# Model Context Protocol client (see super.tools.mcp_bridge)
+mcp = [
+  "mcp>=1.9,<2",
+  "httpx>=0.27",
 ]
 crewai = [
   "crewai>=0.80",

@@ -10,13 +10,13 @@ type Props = {
   messages: ChatMessage[];
   isRenaming: boolean;
   onRename: (id: string, title: string | null) => void;
-  busy: boolean;
+  busy?: boolean;
   agentView?: { parentId: string; agentName: string; role?: string } | null;
   onBackToParent?: () => void;
 };
 
 export function ChatHeader({
-  activeId, activeMeta, messages, isRenaming, onRename, busy,
+  activeId, activeMeta, messages, isRenaming, onRename,
   agentView, onBackToParent,
 }: Props) {
   const [headerEditing, setHeaderEditing] = useState(false);
@@ -111,10 +111,6 @@ export function ChatHeader({
           </span>
         </div>
       </div>
-      <span className="mono small muted chat-header-status">
-        <span className="dot" style={{ background: busy ? 'var(--yellow)' : 'var(--green)', animation: busy ? undefined : 'none' }} aria-hidden />
-        {busy ? 'writing…' : 'ready'}
-      </span>
     </div>
   );
 }

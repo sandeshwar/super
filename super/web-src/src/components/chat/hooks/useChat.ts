@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, streamChat } from '../../../api';
-import type { ChatMessage, ChildSpan, GateInfo, LlmStats, SessionSummary, TaskNode, ToolEvent } from '../../../types';
+import type { ApprovalRequest, ChatBlock, ChatMessage, ChildSpan, GateInfo, LlmStats, MediaPart, SessionSummary, TaskNode, ToolEvent, CanvasPart } from '../../../types';
+import { mergeMedia } from '../MediaAlbum';
+import { mergeCanvas } from '../CanvasPanel';
 
 import { AbortError, ApiError, userMessage } from '../../../lib/errors';
 import { shortId } from '../../../utils/format';
@@ -108,12 +110,17 @@ export function useChat(opts: ChatRouteOpts = {}) {
       setMessages([]);
       setLlmStats(null);
       setAgentView(null);
+      setBusy(false);
+      busyRef.current = false;
       return;
     }
     let cancelled = false;
-    api.session(activeId)
-      .then((s) => {
-        if (cancelled) return;
+    let pollTimer: number | null = null;
+
+    const applySession = (s: Awaited<ReturnType<typeof api.session>>) => {
+      const localStream = Boolean(abortRef.current);
+      // Background/reconnect only — don't clobber an in-tab SSE stream.
+      if (!localStream) {
         setMessages(s.messages);
         const last = [...s.messages].reverse().find((m) => m.role === 'assistant');
         const stats = last?.gate?.agent?.llm_stats;
@@ -127,21 +134,60 @@ export function useChat(opts: ChatRouteOpts = {}) {
         } else {
           setAgentView(null);
         }
-      })
-      .catch((e) => {
-        if (cancelled) return;
-        const msg = userMessage(e).toLowerCase();
-        if (msg.includes('no such session') || msg.includes('404') || (e instanceof ApiError && e.isNotFound)) {
-          setActiveId(null);
-          setAgentView(null);
-          setMessages([]);
-          void loadSessions();
-          setError('Previous chat not found — started a new one. Just resend.');
-        } else {
-          setError(userMessage(e));
-        }
-      });
-    return () => { cancelled = true; };
+      }
+      const gen = Boolean(s.generating);
+      if (localStream) return false;
+      if (gen) {
+        busyRef.current = true;
+        setBusy(true);
+      } else {
+        busyRef.current = false;
+        setBusy(false);
+      }
+      return gen;
+    };
+
+    const load = () =>
+      api.session(activeId)
+        .then((s) => {
+          if (cancelled) return;
+          const gen = applySession(s);
+          if (gen && pollTimer == null) {
+            pollTimer = window.setInterval(() => {
+              void api.session(activeId)
+                .then((next) => {
+                  if (cancelled) return;
+                  if (!applySession(next)) {
+                    if (pollTimer != null) {
+                      window.clearInterval(pollTimer);
+                      pollTimer = null;
+                    }
+                    void loadSessions();
+                  }
+                })
+                .catch(() => { /* keep polling */ });
+            }, 1000);
+          }
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          const msg = userMessage(e).toLowerCase();
+          if (msg.includes('no such session') || msg.includes('404') || (e instanceof ApiError && e.isNotFound)) {
+            setActiveId(null);
+            setAgentView(null);
+            setMessages([]);
+            void loadSessions();
+            setError('Previous chat not found — started a new one. Just resend.');
+          } else {
+            setError(userMessage(e));
+          }
+        });
+
+    void load();
+    return () => {
+      cancelled = true;
+      if (pollTimer != null) window.clearInterval(pollTimer);
+    };
   }, [activeId, loadSessions, setActiveId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
@@ -280,8 +326,10 @@ export function useChat(opts: ChatRouteOpts = {}) {
     }
     let acc = '';
     const toolEvents: ToolEvent[] = [];
+    const approvalEvents: ApprovalRequest[] = [];
     const childMap = new Map<string, ChildSpan>();
     const syncChildren = () => Array.from(childMap.values());
+    const syncApprovals = () => [...approvalEvents];
     const patchSessionSpans = (sid: string | null, spans: ChildSpan[]) => {
       if (!sid || !spans.length) return;
       setSessions((prev) => prev.map((s) => {
@@ -294,45 +342,216 @@ export function useChat(opts: ChatRouteOpts = {}) {
         return { ...s, spans: [...running, ...rest].slice(0, 8) };
       }));
     };
-    setMessages((m) => [...m, { role: 'assistant', content: '', ts: new Date().toISOString(), tools: [], children: [] }]);
+    setMessages((m) => [...m, { role: 'assistant', content: '', thinking: '', thoughts: [], blocks: [], thinkingLive: false, media: [], canvas: [], ts: new Date().toISOString(), tools: [], children: [], approvals: [] }]);
     const ac = new AbortController();
     abortRef.current = ac;
+    let thinkingAcc = '';
+    let thoughtsAcc: string[] = [];
+    let blocksAcc: ChatBlock[] = [];
+    let thinkStep = -1;
+    let textStep = -1;
+    let thinkLive = false;
+    let mediaAcc: MediaPart[] = [];
+    let canvasAcc: CanvasPart[] = [];
+
+    const syncTimeline = () => {
+      thoughtsAcc = blocksAcc
+        .filter((b): b is Extract<ChatBlock, { kind: 'thinking' }> => b.kind === 'thinking')
+        .map((b) => b.text)
+        .filter(Boolean);
+      thinkingAcc = thoughtsAcc.join('\n\n');
+      return {
+        blocks: blocksAcc.map((b) => ({ ...b })),
+        thoughts: [...thoughtsAcc],
+        thinking: thinkingAcc,
+        thinkingLive: thinkLive,
+      };
+    };
+
+    const findBlock = (kind: 'thinking' | 'text', step: number) => {
+      for (let i = blocksAcc.length - 1; i >= 0; i--) {
+        const b = blocksAcc[i];
+        if (b.kind === kind && b.step === step) return b as Extract<ChatBlock, { kind: 'thinking' | 'text' }>;
+      }
+      return null;
+    };
+
+    const appendToBlock = (kind: 'thinking' | 'text', step: number, delta: string) => {
+      const existing = findBlock(kind, step);
+      if (existing) {
+        existing.text += delta;
+        return existing;
+      }
+      const b: ChatBlock = kind === 'thinking'
+        ? { kind: 'thinking', text: delta, step }
+        : { kind: 'text', text: delta, step };
+      blocksAcc.push(b);
+      return b;
+    };
+
+    const setBlockText = (kind: 'thinking' | 'text', step: number, text: string) => {
+      const existing = findBlock(kind, step);
+      if (existing) {
+        existing.text = text;
+        return existing;
+      }
+      const b: ChatBlock = kind === 'thinking'
+        ? { kind: 'thinking', text, step }
+        : { kind: 'text', text, step };
+      // Insert thinking before same-step text if text already exists
+      if (kind === 'thinking') {
+        const textIdx = blocksAcc.findIndex((x) => x.kind === 'text' && x.step === step);
+        if (textIdx >= 0) {
+          blocksAcc.splice(textIdx, 0, b);
+          return b;
+        }
+      }
+      blocksAcc.push(b);
+      return b;
+    };
+
+    const patchLast = (extra: Partial<ChatMessage> = {}) => {
+      setMessages((m) => {
+        const c = [...m];
+        c[c.length - 1] = {
+          ...c[c.length - 1],
+          content: acc,
+          ...syncTimeline(),
+          media: mediaAcc.length ? mediaAcc : c[c.length - 1].media,
+          canvas: canvasAcc.length ? canvasAcc : c[c.length - 1].canvas,
+          tools: [...toolEvents],
+          children: syncChildren(),
+          approvals: syncApprovals(),
+          ...extra,
+        };
+        return c;
+      });
+    };
+
+    const closeThought = () => {
+      if (thinkLive) {
+        thinkLive = false;
+        patchLast({ thinkingLive: false });
+      }
+    };
 
     const attempt = async (sid: string | null) =>
-      streamChat(sid, text, (d) => {
+      streamChat(sid, text, (_d) => {
         if (ac.signal.aborted) return;
-        acc += d;
-        setMessages((m) => {
-          const c = [...m];
-          c[c.length - 1] = { ...c[c.length - 1], content: acc, tools: [...toolEvents], children: syncChildren() };
-          return c;
-        });
+        // Deltas are applied in onEvent (carry step). Ignore duplicate onDelta.
       }, {
         signal: ac.signal,
         skipUserAppend: sendOpts.skipUserAppend,
         onEvent: (ev) => {
           if (ac.signal.aborted) return;
+          const td = ev.thinking_delta;
+          if (typeof td === 'string' && td) {
+            const step = typeof ev.step === 'number' ? ev.step : Math.max(0, thinkStep);
+            thinkStep = step;
+            thinkLive = true;
+            appendToBlock('thinking', step, td);
+            patchLast(syncTimeline());
+          }
+          if (typeof ev.delta === 'string' && ev.delta) {
+            const step = typeof ev.step === 'number' ? ev.step : Math.max(0, textStep, thinkStep, 0);
+            textStep = step;
+            thinkLive = false;
+            acc += ev.delta;
+            appendToBlock('text', step, ev.delta);
+            patchLast(syncTimeline());
+          }
+          const tstep = ev.thinking_step as { index?: number; step?: number; content?: string } | undefined;
+          if (tstep && typeof tstep.content === 'string' && tstep.content) {
+            const step = typeof tstep.step === 'number' ? tstep.step : Math.max(0, thinkStep);
+            thinkStep = step;
+            thinkLive = false;
+            setBlockText('thinking', step, tstep.content);
+            patchLast(syncTimeline());
+          }
+          const textStepEv = ev.text_step as { step?: number; content?: string } | undefined;
+          if (textStepEv && typeof textStepEv.content === 'string' && textStepEv.content) {
+            const step = typeof textStepEv.step === 'number' ? textStepEv.step : Math.max(0, textStep);
+            textStep = step;
+            thinkLive = false;
+            setBlockText('text', step, textStepEv.content);
+            acc = blocksAcc
+              .filter((x): x is Extract<ChatBlock, { kind: 'text' }> => x.kind === 'text')
+              .map((x) => x.text)
+              .join('\n\n');
+            patchLast(syncTimeline());
+          }
+          if (Array.isArray(ev.blocks)) {
+            blocksAcc = (ev.blocks as ChatBlock[]).filter((b) => b && typeof b === 'object' && b.kind);
+            thinkLive = false;
+            acc = blocksAcc
+              .filter((x): x is Extract<ChatBlock, { kind: 'text' }> => x.kind === 'text')
+              .map((x) => x.text)
+              .join('\n\n');
+            mediaAcc = mergeMedia(
+              mediaAcc,
+              ...blocksAcc
+                .filter((x): x is Extract<ChatBlock, { kind: 'media' }> => x.kind === 'media')
+                .map((x) => x.media),
+            );
+            patchLast(syncTimeline());
+          } else if (Array.isArray(ev.thoughts) && blocksAcc.length === 0) {
+            thoughtsAcc = (ev.thoughts as unknown[]).map((x) => String(x || '')).filter(Boolean);
+            blocksAcc = thoughtsAcc.map((t, i) => ({ kind: 'thinking' as const, text: t, step: i }));
+            thinkLive = false;
+            patchLast(syncTimeline());
+          }
           const stats = ev.llm_stats as LlmStats | undefined;
           if (stats && typeof stats === 'object') {
             setLlmStats(stats);
           }
-          const call = ev.tool_call as { name?: string; arguments?: unknown } | undefined;
-          const result = ev.tool_result as { name?: string; ok?: boolean; content?: string } | undefined;
+          const ap = ev.approval as ApprovalRequest | undefined;
+          if (ap && ap.kind && ap.id != null) {
+            if (!approvalEvents.some((x) => x.kind === ap.kind && x.id === ap.id)) {
+              approvalEvents.push({ ...ap, status: ap.status || 'pending' });
+              patchLast();
+            }
+          }
+          const call = ev.tool_call as { name?: string; arguments?: unknown; step?: number } | undefined;
+          const result = ev.tool_result as {
+            name?: string;
+            ok?: boolean;
+            content?: string;
+            media?: MediaPart[];
+            canvas?: CanvasPart;
+            step?: number;
+          } | undefined;
           if (call?.name) {
+            closeThought();
             toolEvents.push({ kind: 'call', name: call.name, arguments: call.arguments });
-            setMessages((m) => {
-              const c = [...m];
-              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents], children: syncChildren() };
-              return c;
-            });
+            patchLast();
           }
           if (result?.name) {
-            toolEvents.push({ kind: 'result', name: result.name, ok: result.ok, content: result.content });
-            setMessages((m) => {
-              const c = [...m];
-              c[c.length - 1] = { ...c[c.length - 1], tools: [...toolEvents], children: syncChildren() };
-              return c;
+            const media = Array.isArray(result.media) ? result.media : undefined;
+            const canvas = result.canvas && typeof result.canvas === 'object' ? result.canvas : undefined;
+            toolEvents.push({
+              kind: 'result',
+              name: result.name,
+              ok: result.ok,
+              content: result.content,
+              ...(media?.length ? { media } : {}),
+              ...(canvas ? { canvas } : {}),
             });
+            if (media?.length) {
+              mediaAcc = mergeMedia(mediaAcc, media);
+              const step = typeof result.step === 'number' ? result.step : Math.max(0, textStep, thinkStep, 0);
+              blocksAcc.push({ kind: 'media', media, step, tool: result.name });
+            }
+            if (canvas) {
+              canvasAcc = mergeCanvas(canvasAcc, canvas);
+              const step = typeof result.step === 'number' ? result.step : Math.max(0, textStep, thinkStep, 0);
+              blocksAcc.push({ kind: 'canvas', canvas, step, tool: result.name });
+            }
+            patchLast({ media: mediaAcc, canvas: canvasAcc });
+          }
+          const canvasEv = ev.canvas as CanvasPart | undefined;
+          if (canvasEv && canvasEv.id) {
+            canvasAcc = mergeCanvas(canvasAcc, canvasEv);
+            patchLast({ canvas: canvasAcc });
           }
           const child = ev.child_agent as ChildSpan | undefined;
           if (child?.span_id) {
@@ -342,11 +561,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
               summary: child.summary || childMap.get(child.span_id)?.summary || '',
             });
             const kids = syncChildren();
-            setMessages((m) => {
-              const c = [...m];
-              c[c.length - 1] = { ...c[c.length - 1], children: kids, tools: [...toolEvents] };
-              return c;
-            });
+            patchLast({ children: kids });
             patchSessionSpans(sid || activeId, kids);
           }
         },
@@ -363,9 +578,17 @@ export function useChat(opts: ChatRouteOpts = {}) {
         if (isStale && activeId && !sendOpts.skipUserAppend) {
           setActiveId(null);
           acc = '';
+          thinkingAcc = '';
+          thoughtsAcc = [];
+          blocksAcc = [];
+          thinkStep = -1;
+          textStep = -1;
+          thinkLive = false;
+          mediaAcc = [];
+          canvasAcc = [];
           setMessages((m) => {
             const c = [...m];
-            c[c.length - 1] = { ...c[c.length - 1], content: '', tools: [], children: [] };
+            c[c.length - 1] = { ...c[c.length - 1], content: '', thinking: '', thoughts: [], blocks: [], thinkingLive: false, media: [], canvas: [], tools: [], children: [] };
             return c;
           });
           res = await attempt(null);
@@ -378,9 +601,14 @@ export function useChat(opts: ChatRouteOpts = {}) {
         c[c.length - 1] = {
           ...c[c.length - 1],
           content: acc,
+          ...syncTimeline(),
+          thinkingLive: false,
+          media: mediaAcc.length ? mediaAcc : c[c.length - 1].media,
+          canvas: canvasAcc.length ? canvasAcc : c[c.length - 1].canvas,
           gate: res.gate,
           tools: [...toolEvents],
           children: syncChildren(),
+          approvals: syncApprovals(),
         };
         return c;
       });
@@ -432,7 +660,34 @@ export function useChat(opts: ChatRouteOpts = {}) {
   }, [input, activeId, agentView, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
 
   const stop = useCallback(() => {
+    const sid = activeId;
     abortRef.current?.abort();
+    if (sid) {
+      void api.cancelChat(sid).then(async () => {
+        // Pull persisted partial/final once the server run unwinds.
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => window.setTimeout(r, 150));
+          try {
+            const s = await api.session(sid);
+            if (!s.generating) {
+              setMessages(s.messages);
+              busyRef.current = false;
+              setBusy(false);
+              return;
+            }
+          } catch { /* retry */ }
+        }
+      }).catch(() => { /* best-effort */ });
+    }
+  }, [activeId]);
+
+  const patchApprovals = useCallback((idx: number, approvals: ApprovalRequest[]) => {
+    setMessages((m) => {
+      if (idx < 0 || idx >= m.length) return m;
+      const c = [...m];
+      c[idx] = { ...c[idx], approvals };
+      return c;
+    });
   }, []);
 
   const regenerate = useCallback(async (idx: number) => {
@@ -623,6 +878,6 @@ export function useChat(opts: ChatRouteOpts = {}) {
     activeSpanId: agentView?.spanId ?? null,
     selectSession, selectSpan, backToParent,
     loadSessions, loadLeaf, send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
-    handleInputChange, handleFile, setShowSlash, setShowMention,
+    handleInputChange, handleFile, setShowSlash, setShowMention, patchApprovals,
   };
 }
