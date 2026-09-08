@@ -242,8 +242,8 @@ export default function SettingsView({
           <p>{activeMeta.blurb}</p>
         </div>
 
-        {error && <Alert variant="warning" style={{ marginBottom: 'var(--space-3)' }}>{error}</Alert>}
-        {flash && <Alert variant="success" style={{ marginBottom: 'var(--space-3)' }}>{flash}</Alert>}
+        {error && <Alert variant="warning" className="settings-alert">{error}</Alert>}
+        {flash && <Alert variant="success" className="settings-alert">{flash}</Alert>}
 
         {section === 'model' && cfg && (
           <ModelSection
@@ -358,7 +358,7 @@ export default function SettingsView({
         )}
 
         {!cfg && section !== 'appearance' && section !== 'about' && (
-          <div className="muted small" style={{ padding: 'var(--space-4)' }}>Loading settings…</div>
+          <div className="muted small settings-loading">Loading settings…</div>
         )}
       </div>
     </div>
@@ -393,7 +393,7 @@ function ModelSection({
                 value={model}
                 onChange={(e) => onSaveModel(e.target.value)}
                 disabled={saving || !models.length}
-                style={{ flex: 1 }}
+                className="grow"
               >
                 {!models.includes(model) && model && <option value={model}>{model}</option>}
                 {models.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -602,23 +602,20 @@ function AgentsSection({
         <CardHead>Registry ({agents.filter((a) => a.status !== 'archived').length} active)</CardHead>
         <CardBody>
           {agents.length === 0 && <p className="small muted">No agents yet — create one or let the main agent use create_agent.</p>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <div className="col-stack">
             {agents.map((a) => (
               <div
                 key={a.id}
-                style={{
-                  display: 'flex', gap: 'var(--space-2)', alignItems: 'flex-start',
-                  padding: 'var(--space-2)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-sm)',
-                  opacity: a.status === 'archived' ? 0.55 : 1,
-                }}
+                className="agent-row"
+                style={{ opacity: a.status === 'archived' ? 0.55 : 1 }}
               >
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="agent-row-body">
                   <div style={{ fontWeight: 600 }}>{a.name} <span className="mono muted" style={{ fontWeight: 400 }}>{a.role}</span></div>
                   <div className="small muted mono">{a.id} · {a.status} · {a.created_by || '—'}</div>
                   {a.summary && <div className="small" style={{ marginTop: 4 }}>{a.summary}</div>}
                   {a.groups && <div className="mono small muted">groups: {(a.groups || []).join(', ') || '—'}</div>}
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                <div className="agent-row-actions">
                   {a.status === 'pending' && (
                     <Button size="sm" onClick={() => void api.approveAgent(a.id).then(reload).catch((e) => onError(userMessage(e)))}>
                       Approve
@@ -1172,7 +1169,7 @@ function McpSection({
                   </Select>
                 </div>
                 {(s.transport === 'sse' || s.transport === 'http') && (
-                  <div className="settings-field" style={{ gridColumn: '1 / -1' }}>
+                  <div className="settings-field span-all">
                     <label>URL</label>
                     <Input value={s.url || ''} onChange={(e) => update(idx, { url: e.target.value })} placeholder="http://127.0.0.1:3000/sse" />
                   </div>
@@ -1245,14 +1242,13 @@ function WorkspaceSection({
           </p>
           <div className="settings-field">
             <label htmlFor="ws-path">Path</label>
-            <div className="row gap-sm" style={{ alignItems: 'stretch' }}>
+            <div className="row gap-sm stretch">
               <Input
                 id="ws-path"
                 value={wsDraft}
                 onChange={(e) => setWsDraft(e.target.value)}
                 placeholder="/path/to/project"
-                className="mono"
-                style={{ flex: 1 }}
+                className="mono grow"
               />
               <Button variant="secondary" type="button" disabled={picking || saving} onClick={() => void browse()}>
                 {picking ? 'Browsing…' : 'Browse…'}
@@ -1326,7 +1322,7 @@ function AboutSection({
             </code>
           </div>
           <div className="settings-kv"><span>Folder</span><code>{cfg?.workspace || '—'}</code></div>
-          <Button size="sm" variant="ghost" onClick={onRefresh} style={{ alignSelf: 'flex-start' }}>Refresh status</Button>
+          <Button size="sm" variant="ghost" onClick={onRefresh} className="btn-self-start">Refresh status</Button>
         </CardBody>
       </Card>
     </div>

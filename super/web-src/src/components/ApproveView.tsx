@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import type { TaskNode } from '../types';
 import { Badge } from './ui/Badge';
@@ -15,14 +15,14 @@ import { navigate } from '../lib/router';
 
 function DiffUnavailable({ files }: { files: string[] }) {
   return (
-    <div style={{ padding: 'var(--space-3)', background: 'var(--bg-0)', border: '1px dashed var(--border)', borderRadius: 'var(--radius-sm)' }}>
+    <div className="diff-unavailable">
       <Alert variant="warning" style={{ fontSize: 'var(--text-sm)', marginBottom: files.length ? 'var(--space-2)' : 0 }}>
         No git diff for this task yet. Approve only if you have real proof (test output, commit, or screenshot).
       </Alert>
       {files.length > 0 && (
-        <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+        <div className="mono chip-row" style={{ color: 'var(--fg-2)' }}>
           {files.map((f) => (
-            <span key={f} style={{ background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: 4 }}>{f}</span>
+            <span key={f} className="file-chip">{f}</span>
           ))}
         </div>
       )}
@@ -55,7 +55,7 @@ function TaskDiff({ taskId, files }: { taskId: string; files: string[] }) {
   }, [taskId, files.join('\0')]);
 
   if (loading) {
-    return <div className="small muted" style={{ padding: 'var(--space-3)' }}>Loading git diff…</div>;
+    return <div className="small muted panel-pad">Loading git diff…</div>;
   }
   if (error) {
     return <DiffUnavailable files={files} />;
@@ -64,22 +64,7 @@ function TaskDiff({ taskId, files }: { taskId: string; files: string[] }) {
     return <DiffUnavailable files={files} />;
   }
   return (
-    <pre
-      className="mono"
-      style={{
-        margin: 0,
-        padding: 'var(--space-3)',
-        maxHeight: 280,
-        overflow: 'auto',
-        fontSize: 'var(--text-xs)',
-        lineHeight: 1.45,
-        background: 'var(--bg-0)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-sm)',
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-      }}
-    >
+    <pre className="mono diff-pre">
       {diff}
     </pre>
   );
@@ -101,8 +86,27 @@ export default function ApproveView({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [decisionFlash, setDecisionFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { enqueue, pending } = useOfflineQueue();
+  const flashTimer = useRef<number | null>(null);
+  const toastTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+  }, []);
+
+  const pulseFlash = () => {
+    setDecisionFlash(true);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setDecisionFlash(false), 900);
+  };
+  const showToast = (msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 2400);
+  };
 
   const waiting = tasks.filter((t) => t.status === 'waiting');
   const doing = tasks.filter((t) => t.status === 'doing');
@@ -117,7 +121,6 @@ export default function ApproveView({
   const gatePass = Object.values(gates).reduce((s, g) => s + g.pass, 0);
   const gateReject = Object.values(gates).reduce((s, g) => s + g.reject, 0);
   const passRate = gatePass + gateReject ? Math.round((gatePass / (gatePass + gateReject)) * 100) : 100;
-  // Risk is about THIS task's blast radius — not lifetime gate rejects.
   const files = cand?.files?.length ? cand.files : [];
   const fileBlast = files.length;
   const unmetDeps = (cand?.needs || []).length;
@@ -132,27 +135,30 @@ export default function ApproveView({
 
   if (!cand) {
     return (
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: 'var(--space-10)', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-3)' }}>
-          <div style={{ width: 52, height: 52, borderRadius: 'var(--radius-lg)', background: 'var(--green-bg)', border: '1px solid var(--green-border)', display: 'grid', placeItems: 'center', color: 'var(--green)' }}>
-            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2"/></svg>
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 'var(--text-lg)', color: 'var(--fg-0)' }}>Nothing to review</div>
-            <div className="small muted" style={{ marginTop: 4, maxWidth: 360, lineHeight: 'var(--leading-normal)' }}>
-              All tasks are done, or there is no work queued yet.
+      <div className={`approve-shell${decisionFlash ? ' is-flash' : ''}`}>
+        {toast && <Alert variant="success" className="alert--pop settings-alert">{toast}</Alert>}
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="approve-empty">
+            <div className="approve-empty-icon">
+              <svg width="22" height="22" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.2"/></svg>
             </div>
+            <div>
+              <div className="approve-empty-title">Nothing to review</div>
+              <div className="small muted" style={{ marginTop: 4, maxWidth: 360, lineHeight: 'var(--leading-normal)' }}>
+                All tasks are done, or there is no work queued yet.
+              </div>
+            </div>
+            <div className="chip-row" style={{ marginTop: 4 }}>
+              <Badge variant="neutral">{tasks.length} total</Badge>
+              <Badge variant="proven">{tasks.filter((t) => t.status === 'proven').length} done</Badge>
+            </div>
+            <Button size="sm" variant="default" onClick={() => navigate({ view: 'tree' })}>Go to tasks</Button>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 4 }}>
-            <Badge variant="neutral">{tasks.length} total</Badge>
-            <Badge variant="proven">{tasks.filter((t) => t.status === 'proven').length} done</Badge>
+          <div className="table-foot">
+            <span className="mono">{gatePass} checks passed · {gateReject} failed · {passRate}% ok</span>
           </div>
-          <Button size="sm" variant="default" onClick={() => navigate({ view: 'tree' })}>Go to tasks</Button>
-        </div>
-        <div style={{ padding: 'var(--space-2) var(--space-3)', borderTop: '1px solid var(--border-subtle)', background: 'var(--bg-1)', display: 'flex', gap: 'var(--space-2)', alignItems: 'center', fontSize: 'var(--text-sm)', color: 'var(--fg-3)' }}>
-          <span className="mono">{gatePass} checks passed · {gateReject} failed · {passRate}% ok</span>
-        </div>
-      </Card>
+        </Card>
+      </div>
     );
   }
 
@@ -175,15 +181,14 @@ export default function ApproveView({
       } catch (e) {
         if (!navigator.onLine) {
           enqueue(() => doAction().then(() => void onRefresh()), `${kind} ${cand.id}`);
-          setToast('Saved for later — will retry when you are back online');
-          setTimeout(() => setToast(null), 2400);
+          showToast('Saved for later — will retry when you are back online');
           return;
         }
         throw e;
       }
       setNote('');
-      setToast(kind === 'approve' ? `Marked #${cand.id} done` : kind === 'rollback' ? `Reopened from #${cand.id}` : `Sent #${cand.id} back`);
-      window.setTimeout(() => setToast(null), 2400);
+      showToast(kind === 'approve' ? `Marked #${cand.id} done` : kind === 'rollback' ? `Reopened from #${cand.id}` : `Sent #${cand.id} back`);
+      if (kind === 'approve') pulseFlash();
       await onRefresh();
     } catch (e) {
       setError(userMessage(e));
@@ -191,19 +196,19 @@ export default function ApproveView({
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1.2fr .85fr', gap: 'var(--space-3)' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+    <div className="split-approve">
+      <div className="col-stack">
         <Card style={{ overflow: 'hidden' }}>
           <CardHead>
             <h3>Waiting for your review</h3>
             <Badge variant={cand.status === 'waiting' ? 'waiting' : cand.status === 'doing' ? 'doing' : 'neutral'}>{statusLabel(cand.status)}</Badge>
           </CardHead>
 
-          <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+          <div className="panel-stack">
             <div>
               <div className="mono small muted" style={{ fontSize: 'var(--text-2xs)', letterSpacing: 'var(--tracking-wide)', fontWeight: 700 }}>TASK {cand.id}</div>
-              <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', marginTop: 2 }}>{cand.title}</h3>
-              <div style={{ display: 'flex', gap: 'var(--space-2)', marginTop: 'var(--space-2)', flexWrap: 'wrap' }}>
+              <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', marginTop: 2, fontFamily: 'var(--font-display)' }}>{cand.title}</h3>
+              <div className="chip-row" style={{ marginTop: 'var(--space-2)' }}>
                 <Badge variant="neutral">depends on: {cand.needs.length ? cand.needs.join(', ') : 'nothing'}</Badge>
                 {cand.blocks?.length ? <Badge variant="neutral">blocks: {cand.blocks.join(', ')}</Badge> : null}
                 {cand.parent && <Badge variant="neutral">under {cand.parent}</Badge>}
@@ -211,16 +216,16 @@ export default function ApproveView({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+            <div className="col-stack">
               {[
                 { label: 'Done looks like', value: cand.done || '—' },
                 { label: 'Why it matters', value: cand.why || '—', muted: !cand.why },
                 { label: 'Files', value: files.length ? files.join(', ') : 'Not listed yet', muted: !files.length },
                 { label: 'Proof so far', value: cand.proof || 'None yet — add your own below', muted: !cand.proof },
               ].map(({ label, value, muted }) => (
-                <div key={label} style={{ padding: 'var(--space-2) var(--space-3)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-1)', border: '1px solid var(--border-subtle)' }}>
-                  <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)', marginBottom: 'var(--space-1)' }}>{label}</div>
-                  <div style={{ fontSize: 'var(--text-base)', color: muted ? 'var(--fg-3)' : 'var(--fg-1)', lineHeight: 'var(--leading-normal)', wordBreak: 'break-word' }}>{value}</div>
+                <div key={label} className="field-block">
+                  <div className="field-block-label">{label}</div>
+                  <div className={`field-block-value${muted ? ' is-muted' : ''}`}>{value}</div>
                 </div>
               ))}
             </div>
@@ -231,15 +236,15 @@ export default function ApproveView({
               compact
               meta={<Badge variant={files.length > 5 ? 'blocked' : files.length > 2 ? 'waiting' : 'neutral'}>{files.length || 0} file{files.length !== 1 && 's'}</Badge>}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <div className="col-stack">
                 {files.length ? (
-                  <div className="mono" style={{ fontSize: 'var(--text-xs)', color: 'var(--fg-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-1)' }}>
-                    {files.map((f) => <span key={f} style={{ background: 'var(--bg-1)', border: '1px solid var(--border-subtle)', padding: '1px 6px', borderRadius: 4 }}>{f}</span>)}
+                  <div className="mono chip-row" style={{ color: 'var(--fg-2)' }}>
+                    {files.map((f) => <span key={f} className="file-chip">{f}</span>)}
                   </div>
                 ) : (
                   <span className="small muted">No file list on this task yet.</span>
                 )}
-                <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+                <div className="toolbar-actions">
                   <Button size="sm" variant="outline" onClick={() => void act('rollback')}>Undo from #{cand.id}</Button>
                   <span className="small muted" style={{ fontSize: 'var(--text-xs)' }}>Reopens this task and anything after it</span>
                 </div>
@@ -252,7 +257,7 @@ export default function ApproveView({
               compact
               meta={<span className="mono small" style={{ fontSize: 'var(--text-xs)', color: gateReject ? 'var(--yellow)' : 'var(--green)' }}>{gatePass} ok · {gateReject} failed</span>}
             >
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <div className="col-stack">
                 <Progress value={gatePass} max={gatePass + gateReject || 1} />
                 <Alert variant={gateReject ? 'warning' : 'success'} style={{ fontSize: 'var(--text-sm)', lineHeight: 'var(--leading-normal)' }}>
                   {strongestGate && strongestGate[1].reject > 0 ? (
@@ -263,7 +268,7 @@ export default function ApproveView({
                     <>All <strong>{gatePass} checks</strong> look clean so far. Still approve only with real proof.</>
                   )}
                 </Alert>
-                <div style={{ display: 'flex', gap: 'var(--space-1)', flexWrap: 'wrap' }}>
+                <div className="chip-row">
                   {Object.entries(gates).sort((a, b) => b[1].reject - a[1].reject).slice(0, 6).map(([k, s]) => (
                     <Badge key={k} variant={s.reject ? 'warning' : 'neutral'} style={{ fontSize: 'var(--text-2xs)' }}>
                       {k} {s.pass}:{s.reject}
@@ -278,7 +283,7 @@ export default function ApproveView({
               <TaskDiff taskId={cand.id} files={files} />
             </Collapsible>
 
-            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+            <div className="chip-row">
               <Badge variant={gateReject ? 'warning' : 'proven'}>
                 Checks: {gatePass} ok · {gateReject} failed ({passRate}%)
               </Badge>
@@ -287,12 +292,12 @@ export default function ApproveView({
 
             {pending > 0 && <Alert variant="warning" style={{ fontSize: 'var(--text-sm)' }}>{pending} action{pending !== 1 && 's'} waiting to retry (offline)</Alert>}
             {error && <Alert variant="error">{error}</Alert>}
-            {toast && <Alert variant="success">{toast}</Alert>}
+            {toast && <Alert variant="success" className="alert--pop">{toast}</Alert>}
           </div>
         </Card>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+      <div className="col-stack">
         <Card style={{ overflow: 'hidden' }}>
           <CardHead>
             <h3>Up next</h3>
@@ -304,23 +309,17 @@ export default function ApproveView({
               return (
                 <button
                   key={t.id}
+                  type="button"
                   onClick={() => setSelectedId(t.id)}
-                  style={{
-                    width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-2)',
-                    padding: 'var(--space-2) var(--space-3)', borderBottom: '1px solid var(--border-subtle)', cursor: 'pointer',
-                    background: active ? 'var(--accent-soft)' : 'transparent', borderLeft: 'none', borderRight: 'none', borderTop: 'none',
-                    textAlign: 'left',
-                  }}
+                  className={`candidate-row${active ? ' is-active' : ''}`}
                 >
-                  <span style={{ fontSize: 'var(--text-base)', fontWeight: active ? 600 : 500, color: active ? 'var(--accent)' : 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    [{t.id}] {t.title}
-                  </span>
+                  <span className="candidate-row-title">[{t.id}] {t.title}</span>
                   <Badge variant={t.status === 'waiting' ? 'waiting' : t.status === 'doing' ? 'doing' : 'neutral'} style={{ fontSize: 'var(--text-2xs)' }}>{statusLabel(t.status)}</Badge>
                 </button>
               );
             })}
           </div>
-          <div style={{ padding: 'var(--space-2) var(--space-3)', background: 'var(--bg-1)', borderTop: '1px solid var(--border-subtle)', fontSize: 'var(--text-xs)', color: 'var(--fg-3)', display: 'flex', gap: 'var(--space-2)' }}>
+          <div className="table-foot">
             <span className="mono">{waiting.length} waiting</span>
             <span aria-hidden>·</span>
             <span className="mono">{doing.length} in progress</span>
@@ -328,8 +327,8 @@ export default function ApproveView({
           </div>
         </Card>
 
-        <Card style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
-          <div className="small" style={{ fontWeight: 700, letterSpacing: 'var(--tracking-wide)', fontSize: 'var(--text-2xs)', color: 'var(--fg-3)' }}>YOUR DECISION</div>
+        <Card className={`panel-stack-lg decision-card${decisionFlash ? ' is-flash' : ''}`}>
+          <div className="section-label">Your decision</div>
           <div>
             <label className="small muted" style={{ display: 'block', marginBottom: 'var(--space-2)', fontSize: 'var(--text-xs)' }}>
               Proof note <span style={{ color: 'var(--fg-4)' }}>— required to approve (test path, commit, or link)</span>
@@ -345,11 +344,11 @@ export default function ApproveView({
               Only mark done when you can point to what you verified. Approving without proof is blocked.
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <Button variant="primary" disabled={busy || !canApprove} onClick={() => void act('approve')} loading={busy} style={{ flex: 1, justifyContent: 'center', height: 'var(--control-h-lg)', borderRadius: 'var(--radius-sm)' }}>
+          <div className="decision-actions">
+            <Button variant="primary" disabled={busy || !canApprove} onClick={() => void act('approve')} loading={busy}>
               Mark done
             </Button>
-            <Button variant="default" disabled={busy} onClick={() => void act('send-back')} style={{ flex: 1, justifyContent: 'center', height: 'var(--control-h-lg)', borderRadius: 'var(--radius-sm)' }}>
+            <Button variant="default" disabled={busy} onClick={() => void act('send-back')}>
               Send back
             </Button>
           </div>

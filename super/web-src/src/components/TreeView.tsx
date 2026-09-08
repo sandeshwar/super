@@ -107,33 +107,24 @@ function Toolbar({
 }) {
   const filters: TreeFilter[] = ['all', 'waiting', 'doing', 'proven', 'blocked'];
   return (
-    <Card style={{ padding: 'var(--space-2)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-2)', alignItems: 'center' }}>
-      <div style={{ display: 'flex', gap: 'var(--space-1)', alignItems: 'center', flexWrap: 'wrap' }}>
+    <Card className="tree-toolbar">
+      <div className="tree-filters">
         {filters.map((k) => (
           <Button
             key={k}
             size="sm"
             variant={f === k ? 'primary' : 'default'}
             onClick={() => setF(k)}
-            style={f === k ? {} : { background: 'var(--bg-1)' }}
+            style={f === k ? undefined : { background: 'var(--bg-1)' }}
           >
             {FILTER_LABEL[k] ?? k}{' '}
-            <span className="mono" style={{ opacity: 0.7, marginLeft: 4 }}>
-              {counts[k] ?? 0}
-            </span>
+            <span className="mono count">{counts[k] ?? 0}</span>
           </Button>
         ))}
       </div>
-      <div style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative' }}>
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 16 16"
-            fill="none"
-            style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--fg-4)' }}
-            aria-hidden
-          >
+      <div className="tree-toolbar-end">
+        <div className="tree-search">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="tree-search-icon" aria-hidden>
             <circle cx="7" cy="7" r="4" stroke="currentColor" strokeWidth="1.2" />
             <path d="M10 10l2.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
           </svg>
@@ -142,23 +133,14 @@ function Toolbar({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Filter by title, why, done…"
-            style={{ paddingLeft: 28, width: 260 }}
             aria-label="Filter tasks"
           />
         </div>
-        <Select value={sort} onChange={(e) => setSort(e.target.value as TreeSort)} style={{ width: 120 }} aria-label="Sort">
+        <Select value={sort} onChange={(e) => setSort(e.target.value as TreeSort)} className="tree-sort" aria-label="Sort">
           <option value="id">Sort: ID</option>
           <option value="status">Sort: Status</option>
         </Select>
-        <span
-          className="mono small muted"
-          style={{
-            padding: 'var(--space-1) var(--space-2)',
-            background: 'var(--bg-1)',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius-sm)',
-          }}
-        >
+        <span className="mono small muted tree-count-pill">
           {filtered} / {total}
         </span>
       </div>
@@ -374,36 +356,14 @@ export default function TreeView({
         <button
           type="button"
           onClick={() => setSelected(t.id)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--space-2)',
-            width: '100%',
-            textAlign: 'left',
-            padding: 'var(--space-2)',
-            paddingLeft: `calc(var(--space-2) + ${depth * 16}px)`,
-            borderRadius: 'var(--radius-sm)',
-            cursor: 'pointer',
-            background: isActive ? 'var(--accent-soft)' : 'var(--bg-2)',
-            border: `1px solid ${isActive ? 'var(--accent-border)' : 'var(--border-subtle)'}`,
-            transition: 'background var(--ease), border-color var(--ease)',
-            opacity: isMatch ? 1 : 0.55,
-          }}
+          className={`tree-row${isActive ? ' is-active' : ''}${isMatch ? '' : ' is-dim'}`}
+          style={{ paddingLeft: `calc(var(--space-2) + ${depth * 16}px)` }}
         >
           <span
             role="button"
             tabIndex={-1}
             onClick={(e) => (hasKids ? toggleExpand(t.id, e) : e.stopPropagation())}
-            style={{
-              width: 18,
-              height: 18,
-              display: 'grid',
-              placeItems: 'center',
-              flexShrink: 0,
-              color: hasKids ? 'var(--fg-2)' : 'transparent',
-              transform: hasKids && isOpen ? 'rotate(90deg)' : undefined,
-              transition: 'transform var(--ease)',
-            }}
+            className={`tree-chevron${hasKids ? '' : ' is-leaf'}${hasKids && isOpen ? ' is-open' : ''}`}
             aria-hidden={!hasKids}
             aria-label={hasKids ? (isOpen ? 'Collapse' : 'Expand') : undefined}
           >
@@ -411,52 +371,15 @@ export default function TreeView({
               <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </span>
-          <span
-            className="mono"
-            style={{
-              minWidth: 34,
-              height: 24,
-              display: 'grid',
-              placeItems: 'center',
-              borderRadius: 'var(--radius-xs)',
-              background: isActive ? 'var(--accent)' : 'var(--bg-3)',
-              color: isActive ? 'var(--accent-fg)' : 'var(--fg-2)',
-              border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
-              fontSize: 'var(--text-xs)',
-              fontWeight: 700,
-            }}
-          >
-            {t.id}
-          </span>
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <span
-              style={{
-                fontWeight: isActive ? 600 : 500,
-                fontSize: 'var(--text-base)',
-                color: isActive ? 'var(--fg-0)' : 'var(--fg-1)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                display: 'block',
-              }}
-            >
-              {t.title}
-            </span>
-            <span
-              className="small muted"
-              style={{
-                display: 'flex',
-                gap: 'var(--space-2)',
-                alignItems: 'center',
-                marginTop: 2,
-                fontSize: 'var(--text-xs)',
-              }}
-            >
+          <span className="mono tree-id">{t.id}</span>
+          <span className="tree-row-body">
+            <span className="tree-row-title">{t.title}</span>
+            <span className="small muted tree-row-meta">
               <span className="truncate" style={{ maxWidth: 180 }}>
                 {t.needs.length ? `${t.needs.length} deps` : 'no deps'}
                 {hasKids ? ` · ${kids.length} child${kids.length === 1 ? '' : 'ren'}` : ''}
               </span>
-              <span style={{ width: 3, height: 3, borderRadius: 'var(--radius-full)', background: 'var(--fg-4)' }} aria-hidden />
+              <span className="tree-dot" aria-hidden />
               <span className="truncate" style={{ maxWidth: 140 }}>
                 {t.why || '—'}
               </span>
@@ -465,7 +388,7 @@ export default function TreeView({
           <StatusBadge status={t.status} />
         </button>
         {hasKids && isOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)', marginTop: 'var(--space-1)' }}>
+          <div className="tree-row-kids">
             {kids.map((c) => renderRow(c, depth + 1))}
           </div>
         )}
@@ -474,7 +397,7 @@ export default function TreeView({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+    <div className="tree-view">
       <Toolbar
         q={q}
         setQ={setQ}
@@ -501,8 +424,8 @@ export default function TreeView({
         <DagGraph tasks={tasks} selected={selected} onSelect={setSelected} bare />
       </Collapsible>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 0.85fr', gap: 'var(--space-3)' }}>
-        <Card style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div className="split-tree">
+        <Card className="tree-list-card">
           <CardHead>
             <h3>
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
@@ -513,7 +436,7 @@ export default function TreeView({
             <span className="head-meta mono">{filtered.length} shown</span>
           </CardHead>
 
-          <div style={{ flex: 1, overflow: 'auto', background: 'var(--bg-1)' }}>
+          <div className="tree-list">
             {tasks.length === 0 ? (
               <div className="empty">
                 <div className="empty-icon" aria-hidden>
@@ -544,25 +467,13 @@ export default function TreeView({
                 </Button>
               </div>
             ) : (
-              <div style={{ padding: 'var(--space-1)', display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
+              <div className="tree-list-inner">
                 {roots.map((t) => renderRow(t, 0))}
               </div>
             )}
           </div>
 
-          <div
-            style={{
-              padding: 'var(--space-2) var(--space-3)',
-              borderTop: '1px solid var(--border-subtle)',
-              background: 'var(--bg-2)',
-              display: 'flex',
-              gap: 'var(--space-2)',
-              alignItems: 'center',
-              fontSize: 'var(--text-xs)',
-              color: 'var(--fg-3)',
-              flexWrap: 'wrap',
-            }}
-          >
+          <div className="table-foot" style={{ background: 'var(--bg-2)', flexWrap: 'wrap' }}>
             <span className="mono">
               {doneCount}/{tasks.length} done
             </span>
@@ -583,13 +494,13 @@ export default function TreeView({
           </div>
         </Card>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', overflow: 'auto' }}>
+        <div className="col-stack" style={{ overflow: 'auto' }}>
           {sel ? (
             <Card style={{ overflow: 'hidden' }}>
-              <div style={{ padding: 'var(--space-3)', display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+              <div className="panel-stack">
+                <div className="tree-detail-head">
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', marginBottom: 'var(--space-1)', flexWrap: 'wrap' }}>
+                    <div className="chip-row" style={{ marginBottom: 'var(--space-1)' }}>
                       <Badge variant="neutral" style={{ fontSize: 'var(--text-xs)' }}>
                         # {sel.id}
                       </Badge>
@@ -598,24 +509,14 @@ export default function TreeView({
                         <Badge variant="neutral">parent {sel.parent}</Badge>
                       )}
                     </div>
-                    <h3
-                      style={{
-                        fontSize: 'var(--text-lg)',
-                        fontWeight: 700,
-                        letterSpacing: 'var(--tracking-tight)',
-                        color: 'var(--fg-0)',
-                        lineHeight: 'var(--leading-tight)',
-                      }}
-                    >
-                      {sel.title}
-                    </h3>
+                    <h3 className="tree-detail-title">{sel.title}</h3>
                   </div>
                   <Badge variant="accent" style={{ fontSize: 'var(--text-xs)' }}>
                     {sel.needs.length} deps
                   </Badge>
                 </div>
 
-                <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                <div className="chip-row">
                   <Button size="sm" variant="primary" onClick={() => navigate({ view: 'approve', taskId: sel.id })}>
                     Open in Review
                   </Button>
@@ -624,7 +525,7 @@ export default function TreeView({
                   </Button>
                 </div>
 
-                <div style={{ display: 'grid', gap: 'var(--space-2)' }}>
+                <div className="col-stack">
                   {(
                     [
                       { k: 'Why it matters', v: sel.why || '—' },
@@ -652,35 +553,13 @@ export default function TreeView({
                       },
                     ] as { k: string; v: string; mono?: boolean; empty?: boolean }[]
                   ).map(({ k, v, mono, empty }) => (
-                    <div
-                      key={k}
-                      style={{
-                        padding: 'var(--space-2) var(--space-3)',
-                        borderRadius: 'var(--radius-sm)',
-                        background: 'var(--bg-1)',
-                        border: '1px solid var(--border-subtle)',
-                      }}
-                    >
+                    <div key={k} className="field-block">
+                      <div className="field-block-label">{k}</div>
                       <div
-                        className="small"
+                        className={`field-block-value${empty ? ' is-muted' : ''}`}
                         style={{
-                          fontWeight: 700,
-                          letterSpacing: 'var(--tracking-wide)',
-                          fontSize: 'var(--text-2xs)',
-                          color: 'var(--fg-3)',
-                          marginBottom: 'var(--space-1)',
-                        }}
-                      >
-                        {k}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 'var(--text-base)',
-                          color: empty ? 'var(--fg-3)' : 'var(--fg-1)',
                           fontFamily: mono ? 'var(--font-mono)' : undefined,
                           fontStyle: empty ? 'italic' : undefined,
-                          lineHeight: 'var(--leading-normal)',
-                          wordBreak: 'break-word',
                         }}
                       >
                         {v}
@@ -695,36 +574,12 @@ export default function TreeView({
                 )}
               </div>
 
-              <div
-                style={{
-                  padding: 'var(--space-2) var(--space-3)',
-                  borderTop: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-1)',
-                  display: 'flex',
-                  gap: 'var(--space-2)',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                }}
-              >
-                <span className="mono small muted" style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <span
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: 'var(--radius-full)',
-                      background:
-                        sel.status === 'proven'
-                          ? 'var(--green)'
-                          : sel.status === 'blocked'
-                            ? 'var(--red)'
-                            : 'var(--yellow)',
-                      display: 'inline-block',
-                    }}
-                    aria-hidden
-                  />
+              <div className="table-foot" style={{ flexWrap: 'wrap' }}>
+                <span className="mono small muted row gap-sm">
+                  <span className={`status-dot ${sel.status}`} aria-hidden />
                   {statusLabel(sel.status)}
                 </span>
-                <span style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--space-2)' }}>
+                <span className="toolbar-actions" style={{ marginLeft: 'auto' }}>
                   <Button size="sm" variant="default" onClick={() => void copy(sel.id)}>
                     copy id
                   </Button>
@@ -735,7 +590,7 @@ export default function TreeView({
               </div>
             </Card>
           ) : (
-            <Card style={{ padding: 'var(--space-10)', textAlign: 'center', color: 'var(--fg-3)' }}>
+            <Card className="panel-pad" style={{ padding: 'var(--space-10)', textAlign: 'center', color: 'var(--fg-3)' }}>
               <div className="empty">
                 <div className="empty-icon" aria-hidden>
                   <svg width="18" height="18" viewBox="0 0 16 16" fill="none">

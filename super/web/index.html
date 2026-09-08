@@ -3,28 +3,46 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SUPER — gated harness</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/styles.css">
+<title>SUPER — use the built SPA</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 48px 24px;
+    font: 400 14px/1.55 Outfit, system-ui, sans-serif;
+    background: #12110f;
+    color: #e4ddd0;
+  }
+  main { max-width: 28rem; }
+  h1 {
+    margin: 0 0 12px;
+    font: 700 28px/1.15 Syne, Georgia, serif;
+    letter-spacing: -0.03em;
+    color: #f6f1e8;
+  }
+  p { margin: 0 0 12px; color: #b8b0a2; }
+  code {
+    font: 500 12px/1.4 "IBM Plex Mono", ui-monospace, monospace;
+    color: #2ec4a0;
+  }
+  a { color: #2ec4a0; }
+</style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <span class="mark">S</span>
-    <span class="wordmark">SUPER <small>GATED HARNESS</small></span>
-  </div>
-  <span id="model" class="model-pill"></span>
-  <nav>
-    <button data-view="chat" class="active">Chat</button>
-    <button data-view="tree">Job Tree</button>
-    <button data-view="approve">Approve</button>
-    <button data-view="report">Report Card</button>
-  </nav>
-</header>
-<main id="view"><p class="muted" style="padding:24px">Loading…</p></main>
-<footer id="bar"><span class="mono">…</span></footer>
-<script src="/app.js"></script>
+<main>
+  <h1>SUPER</h1>
+  <p>
+    The indigo Inter UI that used to live here is gone.
+    The real app is the Vite build in <code>web/dist</code>, served by
+    <code>super.server</code> (<code>WEB_DIR</code>).
+  </p>
+  <p>
+    Build: <code>cd super/web-src && npm run build</code><br>
+    Then open the harness URL (not this file).
+  </p>
+</main>
 </body>
 </html>
