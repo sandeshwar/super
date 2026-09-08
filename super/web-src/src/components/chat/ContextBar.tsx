@@ -12,7 +12,7 @@ function fmtMs(n?: number) {
   return `${n.toFixed(0)}ms`;
 }
 
-/** Single-line context + provider timing. Visibility controlled by side toggle. */
+/** Single-line context + decode/prefill. Visibility controlled by side toggle. */
 export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open, busy }: {
   tokenStats: { total: number; limit: number | null; pct: number | null };
   leaf: TaskNode | null;
@@ -28,13 +28,15 @@ export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open
   const hasLimit = typeof tokenStats.limit === 'number' && tokenStats.limit > 0;
   const decode = fmtTps(llmStats?.decode_tps);
   const prefill = fmtTps(llmStats?.prefill_tps);
+  const tPrefill = fmtMs(llmStats?.prompt_ms);
   const live = llmStats?.source === 'live' || !!busy;
 
   const parts: string[] = [];
-  // Live throughput first so it stays visible while streaming.
   if (decode) parts.push(`decode ${decode}/s${llmStats?.source === 'live' ? '…' : ''}`);
   if (prefill) parts.push(`prefill ${prefill}/s`);
-  else if (llmStats?.source === 'live' && llmStats.prompt_ms != null && llmStats.decode_tps == null) {
+  else if (llmStats?.prefill_cached) {
+    parts.push(tPrefill ? `prefill cached ${tPrefill}` : 'prefill cached');
+  } else if (llmStats?.source === 'live' && llmStats.prompt_ms != null && llmStats.decode_tps == null) {
     parts.push(`prefill ${fmtMs(llmStats.prompt_ms)}…`);
   }
 
@@ -50,27 +52,6 @@ export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open
   if (leaf?.id) parts.push(`task ${leaf.id}`);
   if (cost) parts.push(`~${cost.total} tok`);
 
-  if (llmStats?.step != null) parts.push(`step ${llmStats.step}`);
-  if (llmStats?.prompt_tokens != null) parts.push(`prompt ${llmStats.prompt_tokens.toLocaleString()}`);
-  if (llmStats?.completion_tokens != null) parts.push(`out ${llmStats.completion_tokens.toLocaleString()}`);
-  if (llmStats?.cached_tokens != null) parts.push(`cache ${llmStats.cached_tokens.toLocaleString()}`);
-
-  const tLoad = fmtMs(llmStats?.load_ms);
-  const tPrefill = fmtMs(llmStats?.prompt_ms);
-  const tDecode = fmtMs(llmStats?.eval_ms);
-  const tTotal = fmtMs(llmStats?.total_ms);
-  if (tLoad) parts.push(`load ${tLoad}`);
-  // Avoid duplicating the live "prefill Xs…" already shown above.
-  if (tPrefill && !(llmStats?.source === 'live' && llmStats.decode_tps == null)) {
-    parts.push(`prefill ${tPrefill}`);
-  }
-  if (tDecode) parts.push(`decode ${tDecode}`);
-  if (tTotal) parts.push(`total ${tTotal}`);
-
-  if (llmStats?.done_reason) parts.push(llmStats.done_reason);
-  if (llmStats?.source) parts.push(llmStats.source);
-  else if (live) parts.push('live');
-
   return (
     <div className="context-bar" role="status" aria-label="Context">
       <div className="context-bar-line">
@@ -83,7 +64,7 @@ export function ContextBar({ tokenStats, leaf, messagesLen, cost, llmStats, open
             }} />
           </div>
         )}
-        <span className={`mono context-bar-text${llmStats?.source === 'live' ? ' is-live' : ''}`} style={{ color: over ? 'var(--red)' : undefined }}>
+        <span className={`mono context-bar-text${live && (decode || prefill || llmStats?.prefill_cached) ? ' is-live' : ''}`} style={{ color: over ? 'var(--red)' : undefined }}>
           {parts.join(' · ')}
         </span>
       </div>

@@ -4,6 +4,8 @@ export interface LlmStats {
   prompt_tokens?: number;
   completion_tokens?: number;
   cached_tokens?: number;
+  /** True when prefill tok/s would be cache-inflated / meaningless. */
+  prefill_cached?: boolean;
   prefill_tps?: number;
   decode_tps?: number;
   prompt_ms?: number;

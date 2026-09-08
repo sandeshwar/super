@@ -345,8 +345,42 @@ class ApiService implements IApiService {
     if (!acceptance.length) throw new Error('acceptance criteria required');
     return http.request<{ ok: boolean; spec: { acceptance: string[]; pinned: boolean } }>('/api/spec/pin', 'POST', { id, acceptance });
   }
-  models() { return http.request<{ models: string[]; current: string; context_length?: number | null }>('/api/models', 'GET'); }
-  setModel(model: string) { requireNonEmpty(model, 'model'); return http.request<{ ok: boolean; model: string; context_length?: number | null }>('/api/model', 'POST', { model }); }
+  models() {
+    return http.request<{
+      models: string[];
+      current: string;
+      context_length?: number | null;
+      think?: string;
+      think_levels?: string[];
+      think_supported?: boolean;
+      capabilities?: string[];
+    }>('/api/models', 'GET');
+  }
+  setModel(model: string, think?: boolean | string) {
+    requireNonEmpty(model, 'model');
+    const body: Record<string, unknown> = { model };
+    if (think !== undefined) body.think = think;
+    return http.request<{
+      ok: boolean;
+      model: string;
+      context_length?: number | null;
+      think?: string;
+      think_levels?: string[];
+      think_supported?: boolean;
+      capabilities?: string[];
+    }>('/api/model', 'POST', body);
+  }
+  setThink(think: boolean | string) {
+    return http.request<{
+      ok: boolean;
+      model: string;
+      context_length?: number | null;
+      think?: string;
+      think_levels?: string[];
+      think_supported?: boolean;
+      capabilities?: string[];
+    }>('/api/model', 'POST', { think });
+  }
   workspace() { return http.request<{ workspace: string; state_dir: string; config_path: string | null }>('/api/workspace', 'GET'); }
   setWorkspace(path: string) { requireNonEmpty(path, 'path'); return http.request<{ ok: boolean; workspace: string }>('/api/workspace', 'POST', { path }); }
   pickFolder(path?: string | null) {

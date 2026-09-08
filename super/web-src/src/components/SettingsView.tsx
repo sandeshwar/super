@@ -8,6 +8,8 @@ import { Button } from './ui/Button';
 import { Card, CardBody, CardHead } from './ui/Card';
 import { Input, Select } from './ui/Input';
 import { Switch } from './ui/Switch';
+import { ThinkSelect } from './ui/ThinkSelect';
+import { normalizeThinkLevel, thinkToConfig, type ThinkLevel } from '../lib/think';
 
 export type SettingsSection =
   | 'model'
@@ -140,8 +142,11 @@ export type McpServer = {
 type Props = {
   model: string;
   models: string[];
+  think: ThinkLevel;
+  thinkLevels: ThinkLevel[];
   workspace: string;
   onModelChange: (m: string) => void;
+  onThinkChange: (level: ThinkLevel, meta?: { think_levels?: string[] }) => void;
   onWorkspaceChange: (v: string) => void;
   fetchModels: () => void;
   fetchWorkspace: () => void;
@@ -157,7 +162,7 @@ function sectionFromHash(): SettingsSection {
 }
 
 export default function SettingsView({
-  model, models, workspace, onModelChange, onWorkspaceChange,
+  model, models, think, thinkLevels, workspace, onModelChange, onThinkChange, onWorkspaceChange,
   fetchModels, fetchWorkspace, refresh, onContextLength, section: controlledSection, onSectionChange,
 }: Props) {
   const [section, setSection] = useState<SettingsSection>(() => controlledSection || sectionFromHash());
@@ -253,6 +258,8 @@ export default function SettingsView({
             cfg={cfg}
             model={model}
             models={models}
+            think={think}
+            thinkLevels={thinkLevels}
             saving={saving}
             health={health}
             onRefreshModels={() => { fetchModels(); void load(); }}
@@ -263,8 +270,28 @@ export default function SettingsView({
                 const r = await api.setModel(m);
                 onModelChange(m);
                 onContextLength?.(typeof r.context_length === 'number' ? r.context_length : null);
-                setCfg((c) => (c ? { ...c, llm: { ...c.llm, model: m } } : c));
+                onThinkChange(
+                  normalizeThinkLevel(r.think, (r.think_levels || thinkLevels) as ThinkLevel[]),
+                  { think_levels: r.think_levels },
+                );
+                setCfg((c) => (c ? { ...c, llm: { ...c.llm, model: m, think: thinkToConfig(normalizeThinkLevel(r.think)) } } : c));
                 setFlash('Model updated');
+                setTimeout(() => setFlash(null), 1600);
+              } catch (e) {
+                setError(userMessage(e));
+              } finally {
+                setSaving(false);
+              }
+            }}
+            onSaveThink={async (level) => {
+              setSaving(true);
+              setError(null);
+              try {
+                const r = await api.setThink(thinkToConfig(level));
+                const next = normalizeThinkLevel(r.think || level, (r.think_levels || thinkLevels) as ThinkLevel[]);
+                onThinkChange(next, { think_levels: r.think_levels });
+                setCfg((c) => (c ? { ...c, llm: { ...c.llm, think: thinkToConfig(next) } } : c));
+                setFlash('Thinking updated');
                 setTimeout(() => setFlash(null), 1600);
               } catch (e) {
                 setError(userMessage(e));
@@ -373,19 +400,24 @@ export default function SettingsView({
 }
 
 function ModelSection({
-  cfg, model, models, saving, health, onRefreshModels, onSaveModel, onSaveLlm,
+  cfg, model, models, think, thinkLevels, saving, health,
+  onRefreshModels, onSaveModel, onSaveThink, onSaveLlm,
 }: {
   cfg: PublicConfig;
   model: string;
   models: string[];
+  think: ThinkLevel;
+  thinkLevels: ThinkLevel[];
   saving: boolean;
   health: { llm_reachable?: boolean; llm_detail?: string } | null;
   onRefreshModels: () => void;
   onSaveModel: (m: string) => void;
+  onSaveThink: (level: ThinkLevel) => void;
   onSaveLlm: (llm: PublicConfig['llm']) => void;
 }) {
   const [draft, setDraft] = useState(cfg.llm);
   useEffect(() => { setDraft(cfg.llm); }, [cfg.llm]);
+  const thinkSupported = thinkLevels.length > 1;
 
   return (
     <div className="settings-stack">
@@ -415,6 +447,23 @@ function ModelSection({
                   : 'Checking connection…'}
             </p>
           </div>
+          <div className="settings-field">
+            <label htmlFor="settings-think">Thinking</label>
+            {thinkSupported ? (
+              <ThinkSelect
+                id="settings-think"
+                value={think}
+                levels={thinkLevels}
+                disabled={saving}
+                onChange={(level) => void onSaveThink(level)}
+              />
+            ) : (
+              <p className="settings-hint" id="settings-think">This model doesn’t expose reasoning levels.</p>
+            )}
+            <p className="settings-hint">
+              Effort for models that support thinking / reasoning (Qwen, DeepSeek, …). Streams into the Thought card.
+            </p>
+          </div>
         </CardBody>
       </Card>
 
@@ -439,15 +488,8 @@ function ModelSection({
             <label htmlFor="llm-health">Health path</label>
             <Input id="llm-health" value={draft.health_path} onChange={(e) => setDraft({ ...draft, health_path: e.target.value })} placeholder="/api/tags" />
           </div>
-          <Switch
-            id="llm-think"
-            checked={draft.think !== false && draft.think !== 'false'}
-            onChange={(v) => setDraft({ ...draft, think: v })}
-            label="Show thinking"
-            description="Stream the model's reasoning into a collapsible Thought card (Qwen / DeepSeek / etc.)"
-          />
           <div className="row">
-            <Button variant="primary" disabled={saving} onClick={() => onSaveLlm({ ...draft, model: model || draft.model })}>
+            <Button variant="primary" disabled={saving} onClick={() => onSaveLlm({ ...draft, model: model || draft.model, think: thinkToConfig(think) })}>
               Save connection
             </Button>
           </div>

@@ -63,6 +63,21 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const busyRef = useRef(false);
   /** Bumps to invalidate a hung/stale in-tab stream when server already finished. */
   const sendGenRef = useRef(0);
+  /** Local stream start — used so heal doesn't kill a send before `generating` flips. */
+  const streamStartedAtRef = useRef(0);
+  const sawGeneratingRef = useRef(false);
+
+  /** True when an in-tab SSE should be abandoned for disk truth. */
+  const shouldHealLocalStream = useCallback((generating: boolean) => {
+    if (!abortRef.current) return false;
+    if (generating) {
+      sawGeneratingRef.current = true;
+      return false;
+    }
+    // Only heal after we observed the run start then finish. Never time out a
+    // still-starting POST (Max think / cold model can sit >8s before register).
+    return sawGeneratingRef.current;
+  }, []);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -110,11 +125,16 @@ export function useChat(opts: ChatRouteOpts = {}) {
 
   useEffect(() => {
     if (!activeId) {
-      setMessages([]);
-      setLlmStats(null);
+      // Don't wipe optimistic bubbles mid-send (new chat / stale-session retry).
+      if (!busyRef.current && !abortRef.current) {
+        setMessages([]);
+        setLlmStats(null);
+      }
       setAgentView(null);
-      setBusy(false);
-      busyRef.current = false;
+      if (!busyRef.current) {
+        setBusy(false);
+        busyRef.current = false;
+      }
       setSessionLoading(false);
       return;
     }
@@ -125,6 +145,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
     const applySession = (s: Awaited<ReturnType<typeof api.session>>) => {
       const gen = Boolean(s.generating);
       const localStream = Boolean(abortRef.current);
+      const heal = shouldHealLocalStream(gen);
 
       if (!localStream) {
         setMessages(s.messages);
@@ -140,8 +161,8 @@ export function useChat(opts: ChatRouteOpts = {}) {
         } else {
           setAgentView(null);
         }
-      } else if (!gen) {
-        // Server finished (or never had a run) while our SSE is hung/stale — take disk truth.
+      } else if (heal) {
+        // Server finished while our SSE is hung/stale — take disk truth.
         sendGenRef.current += 1;
         const stale = abortRef.current;
         abortRef.current = null;
@@ -151,8 +172,9 @@ export function useChat(opts: ChatRouteOpts = {}) {
         setLlmStats(stats && typeof stats === 'object' ? stats : null);
         try { stale?.abort(); } catch { /* ignore */ }
       }
+      // else: live local stream still starting or in flight — keep optimistic UI
 
-      if (gen) {
+      if (gen || (localStream && !heal)) {
         busyRef.current = true;
         setBusy(true);
       } else {
@@ -205,7 +227,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
       cancelled = true;
       if (pollTimer != null) window.clearInterval(pollTimer);
     };
-  }, [activeId, loadSessions, setActiveId]);
+  }, [activeId, loadSessions, setActiveId, shouldHealLocalStream]);
 
   // While Stop is showing, keep polling — heals hung SSE after server already finished.
   useEffect(() => {
@@ -215,10 +237,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
         .then((s) => {
           const gen = Boolean(s.generating);
           if (gen) {
+            sawGeneratingRef.current = true;
             if (!abortRef.current) setMessages(s.messages);
             return;
           }
           if (abortRef.current) {
+            // Don't abort a brand-new send before the server marks generating.
+            if (!shouldHealLocalStream(false)) return;
             sendGenRef.current += 1;
             const stale = abortRef.current;
             abortRef.current = null;
@@ -230,12 +255,21 @@ export function useChat(opts: ChatRouteOpts = {}) {
         })
         .catch(() => { /* ignore */ });
     };
-    tick();
+    // Delay first tick so stream POST can register the run (immediate tick raced sends).
+    const first = window.setTimeout(tick, 2000);
     const id = window.setInterval(tick, 1500);
-    return () => window.clearInterval(id);
-  }, [busy, activeId]);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(id);
+    };
+  }, [busy, activeId, shouldHealLocalStream]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
+  useEffect(() => {
+    const el = bottomRef.current?.closest('.message-list');
+    if (!el) return;
+    // Scroll the list only — scrollIntoView can thrash ancestors and restart enter animations.
+    el.scrollTop = el.scrollHeight;
+  }, [messages, busy]);
   useEffect(() => { inputRef.current?.focus(); }, [activeId]);
 
   const filtered = useMemo(() => {
@@ -361,6 +395,8 @@ export function useChat(opts: ChatRouteOpts = {}) {
     setError(null);
     busyRef.current = true;
     setBusy(true);
+    streamStartedAtRef.current = Date.now();
+    sawGeneratingRef.current = false;
     setInput('');
     setShowSlash(false);
     setShowMention(false);

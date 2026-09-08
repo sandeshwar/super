@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ChatMessage, SessionSummary } from '../../types';
 import { Badge } from '../ui/Badge';
 import { Avatar } from './Avatar';
-import { shortId } from '../../utils/format';
+import { ChatSideToggles } from './ChatSideToggles';
 
 type Props = {
   activeId: string | null;
@@ -13,11 +13,19 @@ type Props = {
   busy?: boolean;
   agentView?: { parentId: string; agentName: string; role?: string } | null;
   onBackToParent?: () => void;
+  showTools?: boolean;
+  toolsOpen?: boolean;
+  toolsBusy?: boolean;
+  onToggleTools?: () => void;
+  contextOpen?: boolean;
+  onToggleContext?: () => void;
 };
 
 export function ChatHeader({
   activeId, activeMeta, messages, isRenaming, onRename,
   agentView, onBackToParent,
+  showTools = false, toolsOpen = false, toolsBusy, onToggleTools,
+  contextOpen = false, onToggleContext,
 }: Props) {
   const [headerEditing, setHeaderEditing] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -63,7 +71,7 @@ export function ChatHeader({
             <span className="truncate" style={{ flex: 1, minWidth: 0 }}>
               {agentView
                 ? agentView.agentName
-                : (activeMeta?.title || (activeId ? `Chat ${shortId(activeId, 8)}` : 'New conversation'))}
+                : (activeMeta?.title || (activeId ? 'Untitled' : 'New conversation'))}
             </span>
           )}
           {agentView && (
@@ -101,7 +109,16 @@ export function ChatHeader({
               </button>
             </>
           )}
-          {activeId && <Badge variant="neutral" style={{ fontSize: 'var(--text-2xs)', flexShrink: 0 }}>{shortId(activeId, 8)}</Badge>}
+          {onToggleTools && onToggleContext && (
+            <ChatSideToggles
+              showTools={showTools}
+              toolsOpen={toolsOpen}
+              toolsBusy={toolsBusy}
+              onToggleTools={onToggleTools}
+              contextOpen={contextOpen}
+              onToggleContext={onToggleContext}
+            />
+          )}
         </div>
         <div className="small muted" style={{ fontSize: 'var(--text-xs)', marginTop: 1 }}>
           <span className="truncate">

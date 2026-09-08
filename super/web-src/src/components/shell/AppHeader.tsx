@@ -1,8 +1,10 @@
 import { api } from '../../api';
 import { Icons } from '../ui/Icon';
 import { ThemeToggle } from '../ThemeToggle';
+import { ThinkSelect } from '../ui/ThinkSelect';
 import { modelShort } from '../../utils/format';
 import { userMessage } from '../../lib/errors';
+import { thinkToConfig, normalizeThinkLevel, type ThinkLevel } from '../../lib/think';
 import { VIEW_META } from '../../lib/labels';
 import type { View } from '../../lib/router';
 import type { Stats } from './hooks/useAppData';
@@ -13,9 +15,12 @@ type Props = {
   stats: Stats;
   model: string;
   models: string[];
+  think: ThinkLevel;
+  thinkLevels: ThinkLevel[];
   reloadFlash: boolean;
   setReloadFlash: (v: boolean) => void;
   onModelChange: (m: string, contextLength?: number | null) => void;
+  onThinkChange: (level: ThinkLevel, meta?: { think_levels?: string[] }) => void;
   setError: (e: string | null) => void;
   refresh: () => void;
   fetchModels: () => void;
@@ -28,7 +33,8 @@ type Props = {
 };
 
 export function AppHeader({
-  view, stats, model, models, reloadFlash, setReloadFlash, onModelChange, setError,
+  view, stats, model, models, think, thinkLevels, reloadFlash, setReloadFlash,
+  onModelChange, onThinkChange, setError,
   refresh, fetchModels, fetchWorkspace, onToggleMobile, mobileNav, menuBtnRef, treeQ, onTreeQ,
 }: Props) {
   const NavIcon = Icons[VIEW_META[view].icon];
@@ -81,7 +87,7 @@ export function AppHeader({
           />
         </div>
         <div className="header-divider" aria-hidden />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'relative' }}>
+        <div className="header-model-cluster">
           <span className="pulse" style={{ width: 7, height: 7, borderRadius: 99, background: isOffline ? 'var(--yellow)' : 'var(--green)', flexShrink: 0 }} aria-hidden />
           <select
             value={model}
@@ -90,17 +96,37 @@ export function AppHeader({
               try {
                 const r = await api.setModel(m);
                 onModelChange(m, r.context_length ?? null);
+                onThinkChange(
+                  normalizeThinkLevel(r.think, (r.think_levels || thinkLevels) as ThinkLevel[]),
+                  { think_levels: r.think_levels },
+                );
                 setReloadFlash(true);
                 setTimeout(() => setReloadFlash(false), 1500);
               } catch (err) { setError(userMessage(err)); }
             }}
             title={model || 'offline'}
             aria-label="Model"
-            style={{ maxWidth: 190, padding: '5px 8px', borderRadius: 'var(--radius-full)', background: 'var(--bg-2)', border: '1px solid var(--border)', color: 'var(--fg-1)', fontSize: 'var(--text-xs)', fontFamily: 'var(--font-mono)' }}
+            className="header-model-select"
           >
             {models.length ? models.map((m) => <option key={m} value={m}>{modelShort(m)}</option>) : <option value={model}>{modelLabel}</option>}
           </select>
-          {reloadFlash && <span className="badge accent" style={{ position: 'absolute', top: -8, right: -8, fontSize: 9, padding: '1px 5px' }}>updated</span>}
+          <ThinkSelect
+            compact
+            value={think}
+            levels={thinkLevels}
+            onChange={async (level) => {
+              try {
+                const r = await api.setThink(thinkToConfig(level));
+                onThinkChange(
+                  normalizeThinkLevel(r.think || level, (r.think_levels || thinkLevels) as ThinkLevel[]),
+                  { think_levels: r.think_levels },
+                );
+                setReloadFlash(true);
+                setTimeout(() => setReloadFlash(false), 1500);
+              } catch (err) { setError(userMessage(err)); }
+            }}
+          />
+          {reloadFlash && <span className="badge accent header-model-flash">updated</span>}
         </div>
         <button
           className="icon-btn"

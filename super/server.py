@@ -252,10 +252,12 @@ class Handler(BaseHTTPRequestHandler):
             from . import llm as _llm
             models = _llm.list_models(CFG)
             ctx = _llm.model_context_length(CFG)
+            info = _llm.think_info(CFG)
             return self._send_json({
                 "models": models,
                 "current": CFG["llm"]["model"],
                 "context_length": ctx,
+                **info,
             })
         if u.path == "/api/workspace":
             return self._send_json({"workspace": CFG.get("_root",""), "state_dir": CFG.get("state_dir",""), "config_path": CFG.get("_config_path")})
@@ -757,27 +759,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send_json({"error": str(e), "code": 400}, 400)
             if self.path.split("?")[0] == "/api/model":
                 new_model = str(body.get("model", "")).strip()
-                if not new_model:
-                    return self._send_json({"error": "model required", "code": 400}, 400)
+                think_in = body.get("think", None) if "think" in body else None
+                if not new_model and think_in is None:
+                    return self._send_json({"error": "model or think required", "code": 400}, 400)
                 from . import llm as _llm
-                available = _llm.list_models(CFG)
-                if available and new_model not in available:
-                    # Allow exact current model even if list endpoint flaked empty tags
-                    if new_model != CFG["llm"].get("model"):
-                        return self._send_json({
-                            "error": f"unknown model — choose one of: {', '.join(available[:12])}"
-                                     + ("…" if len(available) > 12 else ""),
-                            "code": 400,
-                            "models": available,
-                        }, 400)
-                CFG["llm"]["model"] = new_model
+                from . import config as _cfg
+                if new_model:
+                    available = _llm.list_models(CFG)
+                    if available and new_model not in available:
+                        # Allow exact current model even if list endpoint flaked empty tags
+                        if new_model != CFG["llm"].get("model"):
+                            return self._send_json({
+                                "error": f"unknown model — choose one of: {', '.join(available[:12])}"
+                                         + ("…" if len(available) > 12 else ""),
+                                "code": 400,
+                                "models": available,
+                            }, 400)
+                    CFG["llm"]["model"] = new_model
+                if think_in is not None:
+                    try:
+                        CFG["llm"]["think"] = _llm.parse_think_level(think_in)
+                    except ValueError as e:
+                        return self._send_json({"error": str(e), "code": 400}, 400)
                 try:
-                    from . import config as _cfg
                     _cfg.save(CFG)
                 except Exception as e:
                     return self._send_json({"error": f"cannot persist model: {e}", "code": 500}, 500)
-                ctx = _llm.model_context_length(CFG, new_model)
-                return self._send_json({"ok": True, "model": new_model, "context_length": ctx})
+                active = CFG["llm"]["model"]
+                ctx = _llm.model_context_length(CFG, active)
+                info = _llm.think_info(CFG, active)
+                return self._send_json({"ok": True, "model": active, "context_length": ctx, **info})
             if self.path.split("?")[0] == "/api/config":
                 from . import config as _cfg
                 from .errors import ConfigError

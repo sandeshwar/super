@@ -9,7 +9,6 @@ import { ContextBar } from './chat/ContextBar';
 import { MessageList } from './chat/MessageList';
 import { ChatDock } from './chat/ChatDock';
 import { ToolRail, collectToolCalls } from './chat/ToolRail';
-import { ChatSideToggles } from './chat/ChatSideToggles';
 import { CanvasPanel, useCanvasController } from './chat/CanvasPanel';
 
 /**
@@ -133,6 +132,12 @@ export default function ChatView({
           busy={busy}
           agentView={agentView}
           onBackToParent={backToParent}
+          showTools={showToolsToggle}
+          toolsOpen={toolsOpen}
+          toolsBusy={busy && toolCount > 0}
+          onToggleTools={toggleTools}
+          contextOpen={contextOpen}
+          onToggleContext={toggleContext}
         />
         <ContextBar
           open={contextOpen}
@@ -166,14 +171,6 @@ export default function ChatView({
             bottomRef={bottomRef}
           />
           <ToolRail messages={messages} busy={busy} open={toolsOpen} />
-          <ChatSideToggles
-            showTools={showToolsToggle}
-            toolsOpen={toolsOpen}
-            toolsBusy={busy && toolCount > 0}
-            onToggleTools={toggleTools}
-            contextOpen={contextOpen}
-            onToggleContext={toggleContext}
-          />
         </div>
         <ChatDock
           input={input}

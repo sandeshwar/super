@@ -30,7 +30,9 @@ function MainShell() {
   });
   const menuBtnRef = useRef<HTMLButtonElement | null>(null);
   const {
-    model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
+    model, setModel, models, contextLength, setContextLength,
+    think, setThink, thinkLevels, applyThinkMeta,
+    workspace, setWorkspace, reloadFlash, setReloadFlash,
     tasks, gates, criticals, error, setError, offlinePending, loading, stats,
     refresh, fetchModels, fetchWorkspace,
   } = useAppData();
@@ -170,11 +172,20 @@ function MainShell() {
           stats={stats}
           model={model}
           models={models}
+          think={think}
+          thinkLevels={thinkLevels}
           reloadFlash={reloadFlash}
           setReloadFlash={setReloadFlash}
           onModelChange={(m, ctx) => {
             setModel(m);
             if (ctx !== undefined) setContextLength(typeof ctx === 'number' && ctx > 0 ? ctx : null);
+          }}
+          onThinkChange={(level, meta) => {
+            if (meta?.think_levels) {
+              applyThinkMeta({ think: level, think_levels: meta.think_levels });
+            } else {
+              setThink(level);
+            }
           }}
           setError={setError}
           refresh={refresh}
@@ -232,8 +243,14 @@ function MainShell() {
                   <SettingsView
                     model={model}
                     models={models}
+                    think={think}
+                    thinkLevels={thinkLevels}
                     workspace={workspace}
                     onModelChange={(m) => setModel(m)}
+                    onThinkChange={(level, meta) => {
+                      if (meta?.think_levels) applyThinkMeta({ think: level, think_levels: meta.think_levels });
+                      else setThink(level);
+                    }}
                     onWorkspaceChange={setWorkspace}
                     fetchModels={fetchModels}
                     fetchWorkspace={fetchWorkspace}

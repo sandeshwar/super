@@ -12,7 +12,7 @@ type Props = {
 };
 
 /**
- * Icon strip glued to the chat panel edge. Tools first; context below; more later.
+ * Panel toggles in the chat header (after rename actions). Tools first; context next; more later.
  */
 export function ChatSideToggles({
   toolsOpen, toolsBusy, showTools = true, onToggleTools,
@@ -29,7 +29,7 @@ export function ChatSideToggles({
           title={toolsOpen ? 'Hide tools' : 'Tools'}
           onClick={onToggleTools}
         >
-          <Icons.tools size={15} />
+          <Icons.tools size={14} />
         </button>
       )}
       <button
@@ -40,7 +40,7 @@ export function ChatSideToggles({
         title={contextOpen ? 'Hide context' : 'Context'}
         onClick={onToggleContext}
       >
-        <Icons.activity size={15} />
+        <Icons.activity size={14} />
       </button>
     </div>
   );

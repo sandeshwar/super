@@ -3,6 +3,7 @@ import { api } from '../../../api';
 import type { TaskNode } from '../../../types';
 import { useOfflineQueue } from '../../../hooks/useOfflineQueue';
 import { userMessage } from '../../../lib/errors';
+import { normalizeThinkLevel, type ThinkLevel } from '../../../lib/think';
 
 export type Stats = { proven: number; total: number; pct: number; gatePass: number; gateReject: number; pending: number; waiting: number; doing: number };
 
@@ -10,6 +11,8 @@ export function useAppData() {
   const [model, setModel] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [contextLength, setContextLength] = useState<number | null>(null);
+  const [think, setThink] = useState<ThinkLevel>('medium');
+  const [thinkLevels, setThinkLevels] = useState<ThinkLevel[]>(['off']);
   const [workspace, setWorkspace] = useState('');
   const [reloadFlash, setReloadFlash] = useState(false);
   const [tasks, setTasks] = useState<TaskNode[]>([]);
@@ -23,6 +26,16 @@ export function useAppData() {
   const modelRef = useRef(model);
   workspaceRef.current = workspace;
   modelRef.current = model;
+
+  const applyThinkMeta = useCallback((r: {
+    think?: string;
+    think_levels?: string[];
+  }) => {
+    const levels = (r.think_levels || []).filter(Boolean) as ThinkLevel[];
+    const nextLevels = levels.length ? levels : (['off'] as ThinkLevel[]);
+    setThinkLevels(nextLevels);
+    setThink(normalizeThinkLevel(r.think, nextLevels));
+  }, []);
 
   useEffect(() => { (window as unknown as { superEnqueue: typeof enqueue }).superEnqueue = enqueue; }, [enqueue]);
 
@@ -47,8 +60,9 @@ export function useAppData() {
       setModels(r.models);
       if (r.current) setModel(r.current);
       setContextLength(typeof r.context_length === 'number' && r.context_length > 0 ? r.context_length : null);
+      applyThinkMeta(r);
     } catch { /* optional */ }
-  }, []);
+  }, [applyThinkMeta]);
 
   const fetchWorkspace = useCallback(async () => {
     try {
@@ -77,10 +91,11 @@ export function useAppData() {
           setTimeout(() => setReloadFlash(false), 2000);
           setModel(m.current);
         }
+        applyThinkMeta(m);
       } catch { /* ignore hot poll errors */ }
     }, 3000);
     return () => { window.clearInterval(id); window.clearInterval(hotId); };
-  }, [refresh, fetchModels, fetchWorkspace]);
+  }, [refresh, fetchModels, fetchWorkspace, applyThinkMeta]);
 
   useEffect(() => {
     const onRefresh = () => { void refresh(); };
@@ -101,7 +116,9 @@ export function useAppData() {
   }, [tasks, gates]);
 
   return {
-    model, setModel, models, contextLength, setContextLength, workspace, setWorkspace, reloadFlash, setReloadFlash,
+    model, setModel, models, contextLength, setContextLength,
+    think, setThink, thinkLevels, setThinkLevels, applyThinkMeta,
+    workspace, setWorkspace, reloadFlash, setReloadFlash,
     tasks, gates, criticals, error, setError, offlinePending, loading,
     stats, refresh, fetchModels, fetchWorkspace, enqueue,
   };

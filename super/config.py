@@ -204,12 +204,12 @@ def _validate(cfg: dict) -> None:
         if isinstance(think, bool):
             pass
         elif isinstance(think, str) and think.strip().lower() in (
-            "true", "false", "low", "medium", "high", "max",
+            "true", "false", "off", "on", "low", "medium", "high", "max",
         ):
             pass
         else:
             raise ConfigError(
-                "llm.think must be boolean or one of low|medium|high|max"
+                "llm.think must be boolean or one of off|low|medium|high|max"
             )
         env = cfg["envelope"]
         for k in ("max_microtask_lines", "best_of_n", "max_steps_per_task"):

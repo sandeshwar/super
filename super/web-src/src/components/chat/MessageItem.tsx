@@ -31,7 +31,7 @@ export function MessageItem({ message, index, busy, isLast, editingIdx, editDraf
   const isUser = message.role === 'user';
   return (
     <div
-      className="msg-wrap fade-in"
+      className="msg-wrap"
       data-msg-key={msgKey(message, index)}
       style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'flex-start', alignSelf: isUser ? 'flex-end' : 'stretch', width: isUser ? 'auto' : '100%', maxWidth: isUser ? '80%' : '100%', flexDirection: isUser ? 'row-reverse' : 'row', overflow: 'visible', position: 'relative' }}
     >

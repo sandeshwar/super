@@ -331,6 +331,16 @@ body{
 }
 .header-title p{font:var(--font-weight-regular) var(--text-sm) var(--font-sans);color:var(--fg-3);margin-top:3px}
 .header-actions{margin-left:auto;display:flex;align-items:center;gap:var(--space-2)}
+.header-model-cluster{
+  display:flex;align-items:center;gap:6px;position:relative;
+}
+.header-model-select,.header-think-select{
+  max-width:190px;padding:5px 8px;border-radius:var(--radius-full);
+  background:var(--bg-2);border:1px solid var(--border);color:var(--fg-1);
+  font-size:var(--text-xs);font-family:var(--font-mono);
+}
+.header-think-select{max-width:108px}
+.header-model-flash{position:absolute;top:-8px;right:-8px;font-size:9px;padding:1px 5px}
 .header-divider{width:1px;height:22px;background:var(--border);margin:0 var(--space-1)}
 .search-wrap{position:relative;display:flex;align-items:center}
 .search-wrap svg{position:absolute;left:11px;width:14px;height:14px;color:var(--fg-4);pointer-events:none}
@@ -564,26 +574,23 @@ tbody tr:hover td{background:var(--surface-overlay)}
 .message-list{flex:1;overflow:auto;padding:var(--space-5) var(--space-4);background:var(--bg-2);min-width:0}
 .message-list-inner{max-width:860px;margin:0 auto;display:flex;flex-direction:column;gap:var(--space-5)}
 .chat-side-toggles{
-  position:absolute;top:8px;right:6px;z-index:4;
-  display:flex;flex-direction:column;align-items:center;gap:6px;
-  width:auto;padding:0;margin:0;
-  background:transparent;border:0;pointer-events:none;
+  display:inline-flex;align-items:center;gap:6px;
+  flex-shrink:0;padding:0;margin:0;
+  background:transparent;border:0;
 }
 .chat-side-toggle{
-  pointer-events:auto;
   position:relative;
-  width:30px;height:30px;padding:0;margin:0;
+  width:26px;height:26px;padding:0;margin:0;
   display:grid;place-items:center;
-  border-radius:var(--radius-sm);
+  border-radius:var(--radius-xs);
   border:1px solid var(--border);
-  background:var(--bg-1);color:var(--fg-3);
+  background:var(--bg-1);color:var(--fg-2);
   cursor:pointer;
   transition:background var(--ease),color var(--ease),border-color var(--ease);
-  box-shadow:var(--shadow-xs);
 }
 .chat-side-toggle:hover{background:var(--bg-2);color:var(--fg-0);border-color:var(--border-strong)}
 .chat-side-toggle.is-active{
-  background:var(--bg-2);color:var(--accent);border-color:var(--accent-border);
+  background:var(--accent-soft);color:var(--accent);border-color:var(--accent-border);
 }
 .chat-side-toggle.is-busy::after{
   content:"";position:absolute;inset:-2px;border-radius:inherit;
@@ -601,8 +608,12 @@ tbody tr:hover td{background:var(--surface-overlay)}
 }
 .canvas-panel-outer{/* sibling of chat card */}
 .canvas-panel-detached{width:160px;max-width:160px}
-.canvas-panel-popout{border:none;border-radius:0;height:100vh;width:100vw}
-.canvas-popout-root{height:100vh;width:100vw;background:var(--bg-1);color:var(--fg-1)}
+.canvas-panel-popout{border:none;border-radius:0;height:100%;width:100%;max-height:none}
+.canvas-popout-root{
+  height:100dvh;width:100vw;max-height:100dvh;
+  display:flex;flex-direction:column;overflow:hidden;
+  background:var(--bg-1);color:var(--fg-1);
+}
 .canvas-rail{
   display:flex;align-items:stretch;width:36px;
   border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-1);overflow:hidden;
@@ -645,12 +656,20 @@ tbody tr:hover td{background:var(--surface-overlay)}
   opacity:0.55;padding:0 2px;line-height:1;font-size:14px;
 }
 .canvas-tab-close:hover{opacity:1;color:var(--red)}
-.canvas-panel-body{flex:1 1 0;min-height:0;overflow:auto;display:flex;flex-direction:column}
-.canvas-frame{flex:1;width:100%;height:100%;min-height:240px;border:0;background:var(--bg-2)}
-.canvas-media-wrap{flex:1;display:grid;place-items:center;padding:var(--space-4);overflow:auto;background:var(--bg-2)}
+.canvas-panel-body{
+  flex:1 1 0;min-height:0;overflow:hidden;position:relative;
+  display:flex;flex-direction:column;
+}
+/* iframes ignore flex stretch — pin to the body box so HTML fills the panel */
+.canvas-frame{
+  position:absolute;inset:0;width:100%;height:100%;border:0;background:var(--bg-2);
+}
+.canvas-media-wrap{
+  flex:1;min-height:0;display:grid;place-items:center;padding:var(--space-4);overflow:auto;background:var(--bg-2);
+}
 .canvas-image{max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--radius-sm)}
 .canvas-video{max-width:100%;max-height:100%;background:#000;border-radius:var(--radius-sm)}
-.canvas-doc{padding:var(--space-4);overflow:auto}
+.canvas-doc{flex:1;min-height:0;padding:var(--space-4);overflow:auto}
 .canvas-file,.canvas-empty,.canvas-detached-body,.canvas-embed-blocked{
   padding:var(--space-4) var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);align-items:flex-start;
 }
@@ -664,7 +683,6 @@ tbody tr:hover td{background:var(--surface-overlay)}
   .canvas-panel{animation:none}
 }
 .chat-main > .message-list,
-.chat-main > .chat-side-toggles,
 .chat-main > .tool-rail{min-height:0;max-height:100%}
 .tool-rail-head{
   display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);
@@ -763,7 +781,6 @@ tbody tr:hover td{background:var(--surface-overlay)}
   }
   .chat-main > .message-list{grid-column:1;grid-row:1}
   .chat-main > .tool-rail{grid-column:1;grid-row:2}
-  .chat-main > .chat-side-toggles{/* absolute overlay */}
   .cols-chat.has-canvas:not(.canvas-collapsed):not(.canvas-detached),
   .cols-chat.has-canvas.canvas-collapsed,
   .cols-chat.has-canvas.canvas-detached{
@@ -805,8 +822,9 @@ tbody tr:hover td{background:var(--surface-overlay)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes riseIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
-.fade-in{animation:fadeIn var(--ease-out)}
-.content-max > *{animation:riseIn var(--ease-out)}
+.fade-in{animation:fadeIn var(--ease-out) both}
+.content-max > *{animation:riseIn var(--ease-out) both}
+.msg-wrap{opacity:1}
 .spin{animation:spin .8s linear infinite}
 
 .skel{position:relative;overflow:hidden;background:var(--bg-3);border-radius:var(--radius-sm)}

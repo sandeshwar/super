@@ -20,6 +20,21 @@ from .errors import LLMError
 _THINK_TAG_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 
 
+# Graded effort for Ollama / mlx-serve thinking models.
+THINK_LEVELS_GRADED: tuple[str, ...] = ("off", "low", "medium", "high", "max")
+_THINK_CAP_ALIASES = frozenset({"thinking", "reasoning"})
+_THINK_NAME_HINTS = (
+    "thinking",
+    "reason",
+    "r1",
+    "qwq",
+    "deepseek-r",
+    "qwen3",
+    "qwen4",
+    "gpt-oss",
+)
+
+
 def think_param(cfg: dict) -> bool | str:
     """Normalize llm.think for the Ollama chat payload (top-level ``think``)."""
     raw = (cfg.get("llm") or {}).get("think", True)
@@ -36,9 +51,121 @@ def think_param(cfg: dict) -> bool | str:
     return bool(raw)
 
 
+def think_level(cfg: dict) -> str:
+    """UI-facing think level: off|low|medium|high|max."""
+    raw = think_param(cfg)
+    if raw is False:
+        return "off"
+    if raw is True:
+        return "medium"
+    if isinstance(raw, str) and raw in THINK_LEVELS_GRADED[1:]:
+        return raw
+    return "medium"
+
+
+def parse_think_level(value) -> bool | str:
+    """Coerce a UI / API value into a stored llm.think setting."""
+    if isinstance(value, bool):
+        return value
+    s = str(value or "").strip().lower()
+    if s in ("false", "0", "no", "off", ""):
+        return False
+    if s in ("true", "1", "yes", "on"):
+        return True
+    if s in ("low", "medium", "high", "max"):
+        return s
+    raise ValueError("think must be off|low|medium|high|max")
+
+
 def _with_think(payload: dict, cfg: dict) -> dict:
     payload["think"] = think_param(cfg)
     return payload
+
+
+def _name_suggests_thinking(name: str) -> bool:
+    n = (name or "").lower()
+    return any(h in n for h in _THINK_NAME_HINTS)
+
+
+def model_capabilities(cfg: dict, model: str | None = None, timeout: float = 8.0) -> list[str]:
+    """Best-effort capability list from /v1/models and/or /api/show."""
+    llm = cfg.get("llm") or {}
+    target = (model or llm.get("model") or "").strip()
+    if not target:
+        return []
+    base = str(llm.get("endpoint") or "").rstrip("/")
+    if not base:
+        return []
+    aliases = _model_aliases(target)
+    found: set[str] = set()
+
+    def _absorb(caps) -> None:
+        if not isinstance(caps, (list, tuple)):
+            return
+        for c in caps:
+            if isinstance(c, str) and c.strip():
+                found.add(c.strip().lower())
+
+    # 1) /v1/models (mlx-serve: reasoning, tool_use, …)
+    try:
+        req = urllib.request.Request(base + "/v1/models", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode())
+        rows = body.get("data") or body.get("models") or []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            rid = str(row.get("id") or row.get("name") or row.get("model") or "")
+            if aliases & _model_aliases(rid) or any(a in rid or rid in a for a in aliases):
+                _absorb(row.get("capabilities"))
+                meta = row.get("meta") if isinstance(row.get("meta"), dict) else {}
+                _absorb(meta.get("capabilities"))
+                break
+    except Exception:
+        pass
+
+    # 2) Ollama /api/show (thinking, tools, …)
+    try:
+        raw = _post(cfg, "/api/show", {"name": target}, timeout)
+        body = json.loads(raw.decode())
+        if isinstance(body, dict):
+            _absorb(body.get("capabilities"))
+    except Exception:
+        pass
+
+    return sorted(found)
+
+
+def think_levels_for(
+    cfg: dict,
+    model: str | None = None,
+    timeout: float = 8.0,
+    caps: list[str] | None = None,
+) -> list[str]:
+    """Levels the UI should offer for the active model/provider."""
+    cap_set = set(caps if caps is not None else model_capabilities(cfg, model=model, timeout=timeout))
+    if cap_set & _THINK_CAP_ALIASES:
+        return list(THINK_LEVELS_GRADED)
+    name = (model or (cfg.get("llm") or {}).get("model") or "")
+    if _name_suggests_thinking(name):
+        return list(THINK_LEVELS_GRADED)
+    # Unknown / non-thinking: only off (selector hidden when len<=1)
+    return ["off"]
+
+
+def think_info(cfg: dict, model: str | None = None, timeout: float = 8.0) -> dict:
+    """Bundle for /api/models and settings: current level + available choices."""
+    caps = model_capabilities(cfg, model=model, timeout=timeout)
+    levels = think_levels_for(cfg, model=model, timeout=timeout, caps=caps)
+    current = think_level(cfg)
+    if current not in levels:
+        current = levels[-1] if len(levels) > 1 else "off"
+    return {
+        "think": current,
+        "think_levels": levels,
+        "think_supported": len(levels) > 1,
+        "capabilities": caps,
+    }
 
 
 def split_think_tags(content: str) -> tuple[str, str]:
@@ -74,6 +201,11 @@ def extract_usage(body: dict | None) -> dict | None:
     """Normalize Ollama/mlx-serve timing fields into UI-friendly stats.
 
     Durations from the provider are nanoseconds. Returns None if no timing present.
+
+    Prefill tok/s uses *uncached* prompt tokens when the provider reports a cache
+    count. mlx-serve often omits that field on KV hits, leaving a tiny
+    ``prompt_eval_duration`` against the full ``prompt_eval_count`` (looks like
+    10k+ tok/s). In that case we suppress ``prefill_tps`` and flag the hit.
     """
     if not isinstance(body, dict):
         return None
@@ -106,7 +238,36 @@ def extract_usage(body: dict | None) -> dict | None:
         out["completion_tokens"] = int(eval_n)
     if isinstance(cached, (int, float)) and cached >= 0:
         out["cached_tokens"] = int(cached)
-    prefill = _tps(prompt_n, prompt_ns)
+
+    # Tokens actually run through prefill this turn (exclude KV hits when known).
+    prefill_n: int | float | None = prompt_n
+    if (
+        isinstance(prompt_n, (int, float))
+        and isinstance(cached, (int, float))
+        and cached >= 0
+    ):
+        prefill_n = max(0, int(prompt_n) - int(cached))
+
+    prefill = _tps(prefill_n, prompt_ns) if prefill_n else None
+    # No cache count from provider: duration collapsed on a warm prompt looks like
+    # absurd throughput. >4k tok/s for a multi-hundred-token prompt ≈ cache hit.
+    if (
+        prefill is not None
+        and isinstance(prompt_n, (int, float))
+        and prompt_n >= 64
+        and prefill >= 4000
+        and not (isinstance(cached, (int, float)) and cached > 0)
+    ):
+        out["prefill_cached"] = True
+        prefill = None
+    elif (
+        isinstance(cached, (int, float))
+        and isinstance(prompt_n, (int, float))
+        and cached > 0
+        and cached >= 0.85 * prompt_n
+    ):
+        out["prefill_cached"] = True
+
     decode = _tps(eval_n, eval_ns)
     if prefill is not None:
         out["prefill_tps"] = prefill

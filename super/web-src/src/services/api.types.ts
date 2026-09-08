@@ -133,8 +133,33 @@ export interface ISecurityService {
   diff(opts?: { id?: string; paths?: string[] }): Promise<{ ok: boolean; diff: string; paths: string[]; empty: boolean; error?: string | null }>;
 }
 export interface IModelService {
-  models(): Promise<{ models: string[]; current: string; context_length?: number | null }>;
-  setModel(model: string): Promise<{ ok: boolean; model: string; context_length?: number | null }>;
+  models(): Promise<{
+    models: string[];
+    current: string;
+    context_length?: number | null;
+    think?: string;
+    think_levels?: string[];
+    think_supported?: boolean;
+    capabilities?: string[];
+  }>;
+  setModel(model: string, think?: boolean | string): Promise<{
+    ok: boolean;
+    model: string;
+    context_length?: number | null;
+    think?: string;
+    think_levels?: string[];
+    think_supported?: boolean;
+    capabilities?: string[];
+  }>;
+  setThink(think: boolean | string): Promise<{
+    ok: boolean;
+    model: string;
+    context_length?: number | null;
+    think?: string;
+    think_levels?: string[];
+    think_supported?: boolean;
+    capabilities?: string[];
+  }>;
 }
 export interface IWorkspaceService {
   workspace(): Promise<{ workspace: string; state_dir: string; config_path: string | null }>;
