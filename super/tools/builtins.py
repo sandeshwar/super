@@ -367,10 +367,7 @@ def memory_search(cfg: dict, args: dict) -> ToolResult:
     from .. import memory
     q = str(args.get("query") or "").strip()
     try:
-        hits = memory.query_graph(cfg, limit=20)
-        if q:
-            ql = q.lower()
-            hits = [h for h in hits if ql in json.dumps(h, default=str).lower()]
+        hits = memory.search(cfg, q, limit=20)
         if not hits:
             text = memory.compile_context(cfg, {"id": "?", "title": q or "search"}, limit=12)
             return ToolResult(True, text or "(no memory hits)")
@@ -384,11 +381,34 @@ def memory_add(cfg: dict, args: dict) -> ToolResult:
     claim = str(args.get("claim") or "").strip()
     if not claim:
         return ToolResult(False, "claim required")
+    ver = str(args.get("verification") or "unverified").strip() or "unverified"
     try:
-        memory.remember(cfg, claim, source=str(args.get("source") or "agent"))
+        stored = memory.remember(
+            cfg, claim,
+            source=str(args.get("source") or "agent"),
+            task_id=str(args.get("task_id") or ""),
+            verification=ver if ver in ("unverified", "verified", "human") else "unverified",
+        )
     except Exception as e:
         return ToolResult(False, str(e))
-    return ToolResult(True, f"stored claim: {claim[:200]}")
+    return ToolResult(True, f"stored claim #{stored.get('id')}: {claim[:200]}")
+
+
+def memory_confirm(cfg: dict, args: dict) -> ToolResult:
+    from .. import memory
+    try:
+        cid = args.get("id")
+        idx = args.get("index")
+        ver = str(args.get("verification") or "verified").strip() or "verified"
+        claim = memory.confirm(
+            cfg,
+            index=int(idx) if idx is not None and str(idx) != "" else None,
+            claim_id=int(cid) if cid is not None and str(cid) != "" else None,
+            verification=ver,
+        )
+    except Exception as e:
+        return ToolResult(False, str(e))
+    return ToolResult(True, dump_json(claim))
 
 def repo_tree(cfg: dict, args: dict) -> ToolResult:
     root = Path(safe_path(cfg, args.get("path") or "."))

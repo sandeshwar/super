@@ -260,8 +260,17 @@ _reg(ToolSpec("memory_search", "memory", "Search memory",
               _props(query=_str("Query", req=True)), B.memory_search))
 _reg(ToolSpec("memory_add", "memory", "Remember a claim",
               "Store a short verified claim for later context.",
-              _props(claim=_str("Claim text", req=True), source=_str("Provenance label")),
+              _props(claim=_str("Claim text", req=True),
+                     source=_str("Provenance label"),
+                     task_id=_str("Related task id"),
+                     verification=_str("unverified | verified | human")),
               B.memory_add, risk="medium"))
+_reg(ToolSpec("memory_confirm", "memory", "Confirm a claim",
+              "Mark a stored claim verified (or retired) by id.",
+              _props(id=_int("Claim id"),
+                     index=_int("Legacy array index"),
+                     verification=_str("verified | human | retired", **{"default": "verified"})),
+              B.memory_confirm, risk="medium"))
 
 # ── project ───────────────────────────────────────────────────────────
 _reg(ToolSpec("repo_tree", "project", "Show folder tree",

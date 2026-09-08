@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
+import { api, type AgentSpec, type MemoryClaim } from '../api';
 import { userMessage } from '../lib/errors';
 import { useAppearance, type Density, type Theme } from '../hooks/useTheme';
 import { getToolPrefs, setToolPrefs, useToolPrefs } from '../lib/toolPrefs';
@@ -14,6 +14,7 @@ export type SettingsSection =
   | 'appearance'
   | 'tools'
   | 'agents'
+  | 'memory'
   | 'mcp'
   | 'workspace'
   | 'safety'
@@ -24,6 +25,7 @@ const SECTIONS: { id: SettingsSection; title: string; blurb: string }[] = [
   { id: 'appearance', title: 'Appearance', blurb: 'Theme, density, motion' },
   { id: 'tools', title: 'Tools', blurb: 'Agent tools, checks, and chat helpers' },
   { id: 'agents', title: 'Agents', blurb: 'Specialized sub-agents (CRUD + inherit parent rules)' },
+  { id: 'memory', title: 'Memory', blurb: 'Stored claims the agent can recall' },
   { id: 'mcp', title: 'MCP servers', blurb: 'Connect external tool servers' },
   { id: 'workspace', title: 'Working dir', blurb: 'Project folder — default cwd, not a sandbox' },
   { id: 'safety', title: 'Safety', blurb: 'Secret scans and package checks' },
@@ -295,6 +297,10 @@ export default function SettingsView({
           <AgentsSection onFlash={setFlash} onError={setError} />
         )}
 
+        {section === 'memory' && (
+          <MemorySection onFlash={setFlash} onError={setError} />
+        )}
+
         {section === 'mcp' && cfg && (
           <McpSection
             servers={cfg.mcp?.servers || []}
@@ -509,13 +515,159 @@ function AppearanceSection({ appearance }: { appearance: ReturnType<typeof useAp
   );
 }
 
+function MemorySection({
+  onFlash, onError,
+}: {
+  onFlash: (s: string | null) => void;
+  onError: (s: string | null) => void;
+}) {
+  const [claims, setClaims] = useState<MemoryClaim[]>([]);
+  const [total, setTotal] = useState(0);
+  const [q, setQ] = useState('');
+  const [draft, setDraft] = useState('');
+  const [includeDead, setIncludeDead] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [replaceId, setReplaceId] = useState<number | null>(null);
+  const [replaceText, setReplaceText] = useState('');
+
+  const reload = useCallback(async (query?: string) => {
+    const qEff = (query ?? q).trim();
+    try {
+      const r = await api.listMemory({ q: qEff || undefined, includeDead, limit: 200 });
+      setClaims(r.claims || []);
+      setTotal(r.total ?? (r.claims || []).length);
+      onError(null);
+    } catch (e) {
+      onError(userMessage(e));
+    }
+  }, [q, includeDead, onError]);
+
+  useEffect(() => { void reload(q); }, [includeDead]); // eslint-disable-line react-hooks/exhaustive-deps — toggle only; search is explicit
+
+  const add = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setBusy(true);
+    try {
+      await api.addMemory(text, { verification: 'human', source: 'human' });
+      setDraft('');
+      onFlash('Claim stored');
+      setTimeout(() => onFlash(null), 1600);
+      await reload();
+    } catch (e) {
+      onError(userMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-stack">
+      <Card>
+        <CardHead>Add claim</CardHead>
+        <CardBody>
+          <p className="small muted" style={{ marginBottom: 'var(--space-3)' }}>
+            Claims feed the agent&apos;s Verified context. Proven tasks and web/search tool hits auto-store;
+            confirm anything you trust, supersede what&apos;s outdated.
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', maxWidth: 640 }}>
+            <Input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Short durable fact…"
+              onKeyDown={(e) => { if (e.key === 'Enter' && !busy) void add(); }}
+              style={{ flex: 1 }}
+            />
+            <Button disabled={busy || !draft.trim()} onClick={() => void add()}>Add</Button>
+          </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHead>Claims ({total})</CardHead>
+        <CardBody>
+          <div style={{ display: 'flex', gap: 'var(--space-2)', marginBottom: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center' }}>
+            <Input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search claims…"
+              onKeyDown={(e) => { if (e.key === 'Enter') void reload(q); }}
+              style={{ flex: 1, minWidth: 180 }}
+            />
+            <Button size="sm" onClick={() => void reload(q)}>Search</Button>
+            <label className="small muted" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input type="checkbox" checked={includeDead} onChange={(e) => setIncludeDead(e.target.checked)} />
+              Show retired
+            </label>
+          </div>
+          {claims.length === 0 && <p className="small muted">No claims yet — prove a task, run a web search, or add one above.</p>}
+          <div className="col-stack">
+            {claims.map((c) => (
+              <div key={c.id} className="agent-row">
+                <div className="agent-row-body">
+                  <div style={{ fontWeight: 500 }}>{c.text}</div>
+                  <div className="small muted mono" style={{ marginTop: 4 }}>
+                    #{c.id} · {c.verification} · {c.source}
+                    {c.taint ? ` · taint:${c.taint}` : ''}
+                    {c.task_id ? ` · task:${c.task_id}` : ''}
+                    {c.valid_from ? ` · ${c.valid_from}` : ''}
+                  </div>
+                  {replaceId === c.id && (
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <Input
+                        value={replaceText}
+                        onChange={(e) => setReplaceText(e.target.value)}
+                        placeholder="Replacement claim…"
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        size="sm"
+                        disabled={!replaceText.trim()}
+                        onClick={() => {
+                          void api.supersedeMemory(c.id, replaceText.trim())
+                            .then(() => { setReplaceId(null); setReplaceText(''); onFlash('Superseded'); setTimeout(() => onFlash(null), 1600); return reload(); })
+                            .catch((e) => onError(userMessage(e)));
+                        }}
+                      >
+                        Replace
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => { setReplaceId(null); setReplaceText(''); }}>Cancel</Button>
+                    </div>
+                  )}
+                </div>
+                <div className="agent-row-actions">
+                  {c.verification === 'unverified' && (
+                    <Button size="sm" onClick={() => void api.confirmMemory(c.id).then(() => reload()).catch((e) => onError(userMessage(e)))}>
+                      Confirm
+                    </Button>
+                  )}
+                  {c.verification !== 'superseded' && c.verification !== 'retired' && (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => { setReplaceId(c.id); setReplaceText(c.text); }}>
+                        Supersede
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => void api.retireMemory(c.id).then(() => reload()).catch((e) => onError(userMessage(e)))}>
+                        Retire
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardBody>
+      </Card>
+    </div>
+  );
+}
+
 function AgentsSection({
   onFlash, onError,
 }: {
   onFlash: (s: string | null) => void;
   onError: (s: string | null) => void;
 }) {
-  const [agents, setAgents] = useState<import('../api').AgentSpec[]>([]);
+  const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState('');
   const [role, setRole] = useState('worker');

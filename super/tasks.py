@@ -199,6 +199,11 @@ def prove(cfg: dict, nid: str, proof: str) -> dict:
     node["proof"] = proof
     node["status"] = "proven"
     _save(cfg, data)
+    try:
+        from . import memory as _mem
+        _mem.remember_from_proof(cfg, node)
+    except Exception:
+        pass
     return node
 
 

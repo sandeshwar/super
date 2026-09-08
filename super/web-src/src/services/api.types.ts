@@ -54,6 +54,17 @@ export type AgentSpec = {
   created?: string;
   updated?: string;
 };
+export type MemoryClaim = {
+  id: number;
+  text: string;
+  source: string;
+  verification: string;
+  taint?: string;
+  task_id?: string;
+  valid_from?: string;
+  valid_until?: string;
+  superseded_by?: string;
+};
 export interface IAgentsService {
   listAgents(includeArchived?: boolean): Promise<{ agents: AgentSpec[] }>;
   getAgent(id: string): Promise<{ agent: AgentSpec }>;
@@ -62,6 +73,13 @@ export interface IAgentsService {
   approveAgent(id: string): Promise<{ ok: boolean; agent: AgentSpec }>;
   archiveAgent(id: string): Promise<{ ok: boolean; agent: AgentSpec }>;
   runAgent(id: string, goal: string): Promise<{ ok: boolean; reply: string; span_id: string; run_id: string }>;
+}
+export interface IMemoryService {
+  listMemory(opts?: { q?: string; includeDead?: boolean; limit?: number; offset?: number }): Promise<{ claims: MemoryClaim[]; total: number; query?: string }>;
+  addMemory(text: string, opts?: { source?: string; verification?: string; task_id?: string }): Promise<{ ok: boolean; claim: MemoryClaim }>;
+  confirmMemory(id: number, verification?: string): Promise<{ ok: boolean; claim: MemoryClaim }>;
+  supersedeMemory(id: number, replacement: string): Promise<{ ok: boolean; claim: MemoryClaim }>;
+  retireMemory(id: number): Promise<{ ok: boolean; claim: MemoryClaim }>;
 }
 export interface ISecurityService {
   sbom(): Promise<{ packages: { name: string; version: string }[]; count: number }>;
@@ -97,4 +115,4 @@ export interface IChatEditService {
   editMessage(id: string, idx: number, content: string): Promise<{ ok: boolean }>;
   leaf(): Promise<{ leaf: import('../types').TaskNode | null; rendered: string }>;
 }
-export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService;
+export type IApiService = IHealthService & ITaskService & ISessionService & IStreamService & ISecurityService & IModelService & IWorkspaceService & IConfigService & IChatDeleteService & IRenameService & IChatEditService & IToolsCatalogService & IAgentsService & IMemoryService;

@@ -20,12 +20,52 @@ class TestMemory(unittest.TestCase):
 
         cfg, root = make_cfg()
         try:
-            M.remember(cfg, "repo uses ruff", source="human", verification="verified")
+            c = M.remember(cfg, "repo uses ruff", source="human", verification="verified")
+            self.assertIn("id", c)
             ctx = M.compile_context(cfg, {"id": "1"})
             self.assertIn("ruff", ctx)
-            M.supersede(cfg, 0, "repo uses oxlint now")
+            M.supersede(cfg, claim_id=c["id"], replacement="repo uses oxlint now")
             ctx2 = M.compile_context(cfg, {"id": "1"})
             self.assertNotIn("ruff", ctx2)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_sqlite_sync_and_search(self):
+        from super import memory as M
+        import sqlite3
+
+        cfg, root = make_cfg()
+        try:
+            M.remember(cfg, "Anthropic CEO is Dario Amodei", source="web-search", verification="unverified")
+            M.remember(cfg, "repo uses ruff for lint", source="human", verification="verified")
+            # second remember should sync sqlite (not leave it empty)
+            con = sqlite3.connect(f"{cfg['state_dir']}/claims.db")
+            n = con.execute("SELECT COUNT(*) FROM claims").fetchone()[0]
+            con.close()
+            self.assertEqual(n, 2)
+            hits = M.search(cfg, "ruff lint")
+            self.assertTrue(hits)
+            self.assertIn("ruff", hits[0]["text"])
+            # dedupe
+            again = M.remember(cfg, "repo uses ruff for lint", source="agent")
+            listed = M.list_claims(cfg)
+            self.assertEqual(listed["total"], 2)
+            self.assertEqual(again["verification"], "verified")  # kept stronger
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_auto_from_proof(self):
+        from super import memory as M
+        from super import tasks as T
+
+        cfg, root = make_cfg()
+        try:
+            nid = T.add(cfg, "wire memory auto-capture", done="tests pass")
+            T.prove(cfg, nid, "tests/test_system.py::TestMemory")
+            hits = M.search(cfg, "auto-capture")
+            self.assertTrue(hits)
+            self.assertEqual(hits[0]["verification"], "verified")
+            self.assertEqual(hits[0]["source"], "prove")
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

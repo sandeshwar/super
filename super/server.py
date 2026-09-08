@@ -186,6 +186,22 @@ class Handler(BaseHTTPRequestHandler):
             from . import agents as _agents
             include = (q.get("include_archived", ["0"])[0] or "0") in ("1", "true", "yes")
             return self._send_json({"agents": _agents.list_agents(CFG, include_archived=include)})
+        if u.path == "/api/memory":
+            from . import memory as _mem
+            query = (q.get("q", [""])[0] or q.get("query", [""])[0] or "").strip()
+            include_dead = (q.get("include_dead", ["0"])[0] or "0") in ("1", "true", "yes")
+            try:
+                lim = int((q.get("limit", ["100"])[0] or "100"))
+            except ValueError:
+                lim = 100
+            try:
+                off = int((q.get("offset", ["0"])[0] or "0"))
+            except ValueError:
+                off = 0
+            if query:
+                hits = _mem.search(CFG, query, limit=lim, include_dead=include_dead)
+                return self._send_json({"claims": hits, "total": len(hits), "query": query})
+            return self._send_json(_mem.list_claims(CFG, include_dead=include_dead, limit=lim, offset=off))
         if u.path == "/api/agent":
             from . import agents as _agents
             aid = (q.get("id", [""])[0] or "").strip()
@@ -426,6 +442,48 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     return self._send_json({"ok": True, "agent": spec})
                 except (ValueError, _SE) as e:
+                    return self._send_json({"error": str(e), "code": 400}, 400)
+            if path_no_q == "/api/memory":
+                from . import memory as _mem
+                from .errors import StoreError as _SE
+                action = str(body.get("action") or "add").strip().lower()
+                try:
+                    if action in ("add", "remember"):
+                        claim = _mem.remember(
+                            CFG,
+                            str(body.get("text") or body.get("claim") or ""),
+                            source=str(body.get("source") or "human"),
+                            taint=str(body.get("taint") or "human"),
+                            task_id=str(body.get("task_id") or ""),
+                            verification=str(body.get("verification") or "human"),
+                        )
+                        return self._send_json({"ok": True, "claim": claim})
+                    if action == "confirm":
+                        claim = _mem.confirm(
+                            CFG,
+                            index=int(body["index"]) if body.get("index") is not None and str(body.get("index")) != "" else None,
+                            claim_id=int(body["id"]) if body.get("id") is not None and str(body.get("id")) != "" else None,
+                            verification=str(body.get("verification") or "verified"),
+                        )
+                        return self._send_json({"ok": True, "claim": claim})
+                    if action == "supersede":
+                        claim = _mem.supersede(
+                            CFG,
+                            index=int(body["index"]) if body.get("index") is not None and str(body.get("index")) != "" else None,
+                            claim_id=int(body["id"]) if body.get("id") is not None and str(body.get("id")) != "" else None,
+                            replacement=str(body.get("replacement") or body.get("text") or ""),
+                        )
+                        return self._send_json({"ok": True, "claim": claim})
+                    if action == "retire":
+                        claim = _mem.confirm(
+                            CFG,
+                            index=int(body["index"]) if body.get("index") is not None and str(body.get("index")) != "" else None,
+                            claim_id=int(body["id"]) if body.get("id") is not None and str(body.get("id")) != "" else None,
+                            verification="retired",
+                        )
+                        return self._send_json({"ok": True, "claim": claim})
+                    return self._send_json({"error": f"unknown action {action}", "code": 400}, 400)
+                except (ValueError, _SE, TypeError) as e:
                     return self._send_json({"error": str(e), "code": 400}, 400)
             if path_no_q == "/api/agent":
                 from . import agents as _agents
@@ -860,5 +918,5 @@ def serve(cfg: dict) -> None:
     print(f"  local:  http://127.0.0.1:{port}/")
     for u in _lan_urls(port):
         print(f"  lan:    {u}")
-    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans /api/fs/pick")
+    print("API: /api/tree /api/job?id= /api/report /api/ledger /api/metrics /api/agents /api/spans /api/memory /api/fs/pick")
     httpd.serve_forever()

@@ -53,6 +53,8 @@ def build_system(cfg: dict) -> str:
         "if unsure something exists, say so instead of inventing it.\n\n"
         "Delegate with create_agent / run_agent when a scoped specialist helps; "
         "children inherit your tools, gates, and budgets (can only tighten).\n\n"
+        "Memory: search stored claims before re-deriving facts; add short durable claims "
+        "you want to keep; confirm after you verify. Proven tasks and web search auto-store.\n\n"
         f"Current task card (if any — not every turn is about this):\n{leaf_txt}\n\n"
         f"Verified context:\n{mem_txt}\n\n"
         f"Working directory: {cfg.get('_root', '.')}\n"

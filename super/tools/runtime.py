@@ -39,6 +39,9 @@ def tools_system_addon(cfg: dict) -> str:
             "For repo questions, prefer read/search tools over guessing. "
             "Specialists: list_agents / create_agent / run_agent when a scoped helper helps; "
             "children inherit your tools, gates, and budgets (can only tighten). "
+            "Memory: memory_search before re-deriving known facts; memory_add for durable "
+            "claims worth recalling (prefer short atomic facts). memory_confirm after you "
+            "verify a claim. Auto-stored search/prove claims show up under Verified context. "
             "Keep tool results focused — use offsets/limits."
         )
     return (
@@ -74,7 +77,12 @@ def execute_tool(cfg: dict, name: str, arguments: dict | str) -> ToolResult:
     except Exception as e:
         return ToolResult(False, f"{type(e).__name__}: {e}")
     if not isinstance(result, ToolResult):
-        return ToolResult(True, str(result))
+        result = ToolResult(True, str(result))
+    try:
+        from .. import memory as _mem
+        _mem.maybe_auto_from_tool(cfg, name, arguments, result)
+    except Exception:
+        pass
     limit = int((cfg.get("tools") or {}).get("max_result_chars", 8000))
     return result.truncated(limit)
 

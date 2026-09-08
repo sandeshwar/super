@@ -207,7 +207,7 @@ export default function ApproveView({
           <div className="panel-stack">
             <div>
               <div className="mono small muted" style={{ fontSize: 'var(--text-2xs)', letterSpacing: 'var(--tracking-wide)', fontWeight: 700 }}>TASK {cand.id}</div>
-              <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 700, letterSpacing: 'var(--tracking-tight)', marginTop: 2, fontFamily: 'var(--font-display)' }}>{cand.title}</h3>
+              <h3 style={{ fontSize: 'var(--text-lg)', fontWeight: 400, fontSynthesis: 'none', letterSpacing: 'var(--tracking-tight)', marginTop: 2, fontFamily: 'var(--font-display)' }}>{cand.title}</h3>
               <div className="chip-row" style={{ marginTop: 'var(--space-2)' }}>
                 <Badge variant="neutral">depends on: {cand.needs.length ? cand.needs.join(', ') : 'nothing'}</Badge>
                 {cand.blocks?.length ? <Badge variant="neutral">blocks: {cand.blocks.join(', ')}</Badge> : null}

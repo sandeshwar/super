@@ -23,6 +23,18 @@ export type AgentSpec = {
   updated?: string;
 };
 
+export type MemoryClaim = {
+  id: number;
+  text: string;
+  source: string;
+  verification: string;
+  taint?: string;
+  task_id?: string;
+  valid_from?: string;
+  valid_until?: string;
+  superseded_by?: string;
+};
+
 // ── Token storage abstraction (DIP) ──
 export interface TokenStore {
   get(): string;
@@ -218,6 +230,34 @@ class ApiService implements IApiService {
     requireId(id);
     requireNonEmpty(goal, 'goal');
     return http.request<{ ok: boolean; reply: string; span_id: string; run_id: string }>('/api/agent', 'POST', { id, action: 'run', goal });
+  }
+  listMemory(opts: { q?: string; includeDead?: boolean; limit?: number; offset?: number } = {}) {
+    const qs = new URLSearchParams();
+    if (opts.q) qs.set('q', opts.q);
+    if (opts.includeDead) qs.set('include_dead', '1');
+    if (opts.limit != null) qs.set('limit', String(opts.limit));
+    if (opts.offset != null) qs.set('offset', String(opts.offset));
+    const q = qs.toString();
+    return http.request<{ claims: MemoryClaim[]; total: number; query?: string }>(`/api/memory${q ? `?${q}` : ''}`, 'GET');
+  }
+  addMemory(text: string, opts: { source?: string; verification?: string; task_id?: string } = {}) {
+    requireNonEmpty(text, 'text');
+    return http.request<{ ok: boolean; claim: MemoryClaim }>('/api/memory', 'POST', {
+      action: 'add',
+      text,
+      source: opts.source || 'human',
+      verification: opts.verification || 'human',
+      task_id: opts.task_id || '',
+    });
+  }
+  confirmMemory(id: number, verification = 'verified') {
+    return http.request<{ ok: boolean; claim: MemoryClaim }>('/api/memory', 'POST', { action: 'confirm', id, verification });
+  }
+  supersedeMemory(id: number, replacement: string) {
+    return http.request<{ ok: boolean; claim: MemoryClaim }>('/api/memory', 'POST', { action: 'supersede', id, replacement });
+  }
+  retireMemory(id: number) {
+    return http.request<{ ok: boolean; claim: MemoryClaim }>('/api/memory', 'POST', { action: 'retire', id });
   }
   sbom() { return http.request<{ packages: { name: string; version: string }[]; count: number }>('/api/sbom', 'GET'); }
   sink() { return http.request<{ entries: number; violations: unknown[]; clean: boolean }>('/api/sink', 'GET'); }
