@@ -33,6 +33,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(() => Boolean(opts.sessionId));
   const [filter, setFilter] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
   const [leaf, setLeaf] = useState<TaskNode | null>(null);
@@ -60,6 +61,8 @@ export function useChat(opts: ChatRouteOpts = {}) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const busyRef = useRef(false);
+  /** Bumps to invalidate a hung/stale in-tab stream when server already finished. */
+  const sendGenRef = useRef(0);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -112,14 +115,17 @@ export function useChat(opts: ChatRouteOpts = {}) {
       setAgentView(null);
       setBusy(false);
       busyRef.current = false;
+      setSessionLoading(false);
       return;
     }
     let cancelled = false;
     let pollTimer: number | null = null;
+    setSessionLoading(true);
 
     const applySession = (s: Awaited<ReturnType<typeof api.session>>) => {
+      const gen = Boolean(s.generating);
       const localStream = Boolean(abortRef.current);
-      // Background/reconnect only — don't clobber an in-tab SSE stream.
+
       if (!localStream) {
         setMessages(s.messages);
         const last = [...s.messages].reverse().find((m) => m.role === 'assistant');
@@ -134,9 +140,18 @@ export function useChat(opts: ChatRouteOpts = {}) {
         } else {
           setAgentView(null);
         }
+      } else if (!gen) {
+        // Server finished (or never had a run) while our SSE is hung/stale — take disk truth.
+        sendGenRef.current += 1;
+        const stale = abortRef.current;
+        abortRef.current = null;
+        setMessages(s.messages);
+        const last = [...s.messages].reverse().find((m) => m.role === 'assistant');
+        const stats = last?.gate?.agent?.llm_stats;
+        setLlmStats(stats && typeof stats === 'object' ? stats : null);
+        try { stale?.abort(); } catch { /* ignore */ }
       }
-      const gen = Boolean(s.generating);
-      if (localStream) return false;
+
       if (gen) {
         busyRef.current = true;
         setBusy(true);
@@ -152,6 +167,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
         .then((s) => {
           if (cancelled) return;
           const gen = applySession(s);
+          setSessionLoading(false);
           if (gen && pollTimer == null) {
             pollTimer = window.setInterval(() => {
               void api.session(activeId)
@@ -171,6 +187,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
         })
         .catch((e) => {
           if (cancelled) return;
+          setSessionLoading(false);
           const msg = userMessage(e).toLowerCase();
           if (msg.includes('no such session') || msg.includes('404') || (e instanceof ApiError && e.isNotFound)) {
             setActiveId(null);
@@ -189,6 +206,34 @@ export function useChat(opts: ChatRouteOpts = {}) {
       if (pollTimer != null) window.clearInterval(pollTimer);
     };
   }, [activeId, loadSessions, setActiveId]);
+
+  // While Stop is showing, keep polling — heals hung SSE after server already finished.
+  useEffect(() => {
+    if (!busy || !activeId) return;
+    const tick = () => {
+      void api.session(activeId)
+        .then((s) => {
+          const gen = Boolean(s.generating);
+          if (gen) {
+            if (!abortRef.current) setMessages(s.messages);
+            return;
+          }
+          if (abortRef.current) {
+            sendGenRef.current += 1;
+            const stale = abortRef.current;
+            abortRef.current = null;
+            try { stale.abort(); } catch { /* ignore */ }
+          }
+          setMessages(s.messages);
+          busyRef.current = false;
+          setBusy(false);
+        })
+        .catch(() => { /* ignore */ });
+    };
+    tick();
+    const id = window.setInterval(tick, 1500);
+    return () => window.clearInterval(id);
+  }, [busy, activeId]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, busy]);
   useEffect(() => { inputRef.current?.focus(); }, [activeId]);
@@ -321,6 +366,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
     setShowMention(false);
     setLlmStats(null);
     const startChars = text.length;
+    const runId = ++sendGenRef.current;
     if (!sendOpts.reuseLocalUser) {
       setMessages((m) => [...m, { role: 'user', content: text, ts: new Date().toISOString() }]);
     }
@@ -376,7 +422,21 @@ export function useChat(opts: ChatRouteOpts = {}) {
       return null;
     };
 
+    /** Prefer extending the trailing thinking card so consecutive thoughts stay one block. */
+    const trailingThinking = () => {
+      const last = blocksAcc[blocksAcc.length - 1];
+      return last?.kind === 'thinking' ? last : null;
+    };
+
     const appendToBlock = (kind: 'thinking' | 'text', step: number, delta: string) => {
+      if (kind === 'thinking') {
+        const trail = trailingThinking();
+        if (trail) {
+          trail.text += delta;
+          trail.step = step;
+          return trail;
+        }
+      }
       const existing = findBlock(kind, step);
       if (existing) {
         existing.text += delta;
@@ -390,6 +450,20 @@ export function useChat(opts: ChatRouteOpts = {}) {
     };
 
     const setBlockText = (kind: 'thinking' | 'text', step: number, text: string) => {
+      if (kind === 'thinking') {
+        const trail = trailingThinking();
+        if (trail) {
+          if (trail.step === step) {
+            trail.text = text;
+          } else {
+            const left = (trail.text || '').trimEnd();
+            const right = text.trim();
+            trail.text = left && right ? `${left}\n\n${right}` : (left || right);
+            trail.step = step;
+          }
+          return trail;
+        }
+      }
       const existing = findBlock(kind, step);
       if (existing) {
         existing.text = text;
@@ -502,7 +576,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
           }
           const stats = ev.llm_stats as LlmStats | undefined;
           if (stats && typeof stats === 'object') {
-            setLlmStats(stats);
+            setLlmStats((prev) => ({ ...(prev || {}), ...stats }));
           }
           const ap = ev.approval as ApprovalRequest | undefined;
           if (ap && ap.kind && ap.id != null) {
@@ -615,10 +689,11 @@ export function useChat(opts: ChatRouteOpts = {}) {
       const finalStats = res.gate?.agent?.llm_stats;
       if (finalStats) setLlmStats(finalStats);
       if (!activeId) setActiveId(res.session_id);
-      // Unstick UI immediately — session refresh is non-critical.
-      busyRef.current = false;
-      setBusy(false);
-      abortRef.current = null;
+      if (sendGenRef.current === runId) {
+        busyRef.current = false;
+        setBusy(false);
+        abortRef.current = null;
+      }
       void loadSessions();
       void loadLeaf();
       setCost({
@@ -627,11 +702,13 @@ export function useChat(opts: ChatRouteOpts = {}) {
         total: Math.ceil((startChars + acc.length + (leafRendered?.length || 0)) / 4),
       });
     } catch (e) {
-      if (e instanceof AbortError || (e as Error)?.name === 'AbortError') {
+      if (sendGenRef.current !== runId) {
+        // Superseded by heal/newer send — don't clobber synced messages.
+      } else if (e instanceof AbortError || (e as Error)?.name === 'AbortError') {
         setMessages((m) => {
           if (!m.length) return m;
           const last = m[m.length - 1];
-          if (last.role === 'assistant' && !last.content.trim() && !(last.tools?.length)) {
+          if (last.role === 'assistant' && !last.content.trim() && !(last.tools?.length) && !(last.blocks?.length)) {
             return m.slice(0, -1);
           }
           if (last.role === 'assistant') {
@@ -645,36 +722,52 @@ export function useChat(opts: ChatRouteOpts = {}) {
         setError(userMessage(e));
         setMessages((m) => {
           if (!m.length) return m;
-          // Drop empty assistant; keep user (server may already have it).
           const last = m[m.length - 1];
-          if (last.role === 'assistant') return m.slice(0, -1);
-          return m;
+          if (last.role !== 'assistant') return m;
+          const has =
+            !!(last.content || '').trim()
+            || !!(last.tools?.length)
+            || !!(last.blocks?.length)
+            || !!(last.thinking || '').trim()
+            || !!(last.thoughts?.length);
+          return has ? m : m.slice(0, -1);
         });
+        const sid = activeId;
+        if (sid) {
+          void api.session(sid).then((s) => {
+            if (sendGenRef.current !== runId) return;
+            setMessages(s.messages);
+            const gen = Boolean(s.generating);
+            busyRef.current = gen;
+            setBusy(gen);
+          }).catch(() => { /* ignore */ });
+        }
       }
     } finally {
-      busyRef.current = false;
-      setBusy(false);
-      abortRef.current = null;
+      if (sendGenRef.current === runId) {
+        busyRef.current = false;
+        setBusy(false);
+        abortRef.current = null;
+      }
       window.setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [input, activeId, agentView, loadSessions, loadLeaf, leafRendered, activeMeta, messages, setActiveId, systemNote]);
 
   const stop = useCallback(() => {
     const sid = activeId;
+    sendGenRef.current += 1;
     abortRef.current?.abort();
+    abortRef.current = null;
+    busyRef.current = false;
+    setBusy(false);
     if (sid) {
       void api.cancelChat(sid).then(async () => {
-        // Pull persisted partial/final once the server run unwinds.
         for (let i = 0; i < 20; i++) {
           await new Promise((r) => window.setTimeout(r, 150));
           try {
             const s = await api.session(sid);
-            if (!s.generating) {
-              setMessages(s.messages);
-              busyRef.current = false;
-              setBusy(false);
-              return;
-            }
+            setMessages(s.messages);
+            if (!s.generating) return;
           } catch { /* retry */ }
         }
       }).catch(() => { /* best-effort */ });
@@ -869,6 +962,7 @@ export function useChat(opts: ChatRouteOpts = {}) {
 
   return {
     sessions, filtered, activeId, setActiveId, messages, input, setInput, busy, error, setError, filter, setFilter,
+    sessionLoading,
     isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,

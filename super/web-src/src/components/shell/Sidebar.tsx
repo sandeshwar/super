@@ -66,22 +66,17 @@ export function Sidebar({
       aria-expanded={!collapsed}
     >
       <div className="sidebar-top">
-        <div className="brand">
-          <button
-            type="button"
-            className="icon-btn sidebar-hamburger"
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-            aria-expanded={!collapsed}
-            aria-controls="app-sidebar"
-            onClick={onToggleCollapsed}
-            title={collapsed ? 'Expand nav' : 'Collapse nav'}
-          >
-            <Icons.menu size={16} />
-          </button>
-          <div className="brand-mark" aria-hidden>S</div>
-          <div className="brand-wordmark">SUPER<span>Generalist assistant</span></div>
-          <span className="brand-version">v1.0</span>
-        </div>
+        <button
+          type="button"
+          className="icon-btn sidebar-hamburger"
+          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          aria-expanded={!collapsed}
+          aria-controls="app-sidebar"
+          onClick={onToggleCollapsed}
+          title={collapsed ? 'Expand nav' : 'Collapse nav'}
+        >
+          <Icons.menu size={16} />
+        </button>
       </div>
 
       <nav className="sidebar-nav" aria-label="Main">
@@ -107,7 +102,7 @@ export function Sidebar({
                 {count !== undefined && count > 0 && !(v === 'approve' && stats.pending > 0 && !isActive) && (
                   <span className="badge-count">{v === 'report' ? `${stats.proven}/${stats.total}` : count}</span>
                 )}
-                {v === 'chat' && isActive && <span className="dot-live" style={{ background: 'var(--accent)' }} aria-hidden />}
+                {v === 'chat' && isActive && <span className="dot-live" aria-hidden />}
               </Link>
             );
           })}

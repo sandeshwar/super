@@ -75,7 +75,13 @@ export function userMessage(e: unknown): string {
     if (err.isServer) return 'Server error — check the backend logs';
     return err.message;
   }
-  if (err instanceof NetworkError) return 'Network error — is the SUPER server running?';
+  if (err instanceof NetworkError) {
+    if (/timed out|timeout/i.test(err.message)) {
+      return 'Chat timed out waiting on the server. Refresh to sync — the run may still be in progress.';
+    }
+    return 'Network error — is the SUPER server running?';
+  }
+  if (err instanceof StreamError) return err.message || 'Stream failed';
   if (err instanceof ValidationError) return err.message;
   return err.message || 'Something went wrong';
 }

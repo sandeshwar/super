@@ -1020,6 +1020,7 @@ class Handler(BaseHTTPRequestHandler):
                         import time as _time
                         chunks: list[str] = []
                         think_chunks: list[str] = []
+                        t_start = _time.monotonic()
                         t_first = None
                         chars = 0
                         for ev in llm.chat_stream(CFG, messages):
@@ -1028,23 +1029,44 @@ class Handler(BaseHTTPRequestHandler):
                                 break
                             if "thinking_delta" in ev and ev["thinking_delta"]:
                                 think_chunks.append(ev["thinking_delta"])
-                                _emit({"thinking_delta": ev["thinking_delta"]})
+                                now = _time.monotonic()
+                                _emit({
+                                    "thinking_delta": ev["thinking_delta"],
+                                    "llm_stats": {
+                                        "source": "live",
+                                        "prompt_ms": round((now - t_start) * 1000, 1),
+                                    },
+                                })
                             if "delta" in ev:
                                 d = ev["delta"]
                                 chunks.append(d)
                                 chars += len(d)
                                 now = _time.monotonic()
+                                tok = max(1, chars // 4)
                                 if t_first is None:
                                     t_first = now
-                                    _emit({"delta": d})
+                                    _emit({
+                                        "delta": d,
+                                        "llm_stats": {
+                                            "source": "live",
+                                            "completion_tokens": tok,
+                                            "prompt_ms": round((t_first - t_start) * 1000, 1),
+                                            "total_ms": round((now - t_start) * 1000, 1),
+                                        },
+                                    })
                                 elif now > t_first:
-                                    tok = max(1, chars // 4)
-                                    live = {
-                                        "source": "live",
-                                        "completion_tokens": tok,
-                                        "decode_tps": round(tok / (now - t_first), 2),
-                                    }
-                                    _emit({"delta": d, "llm_stats": live})
+                                    elapsed = max(1e-3, now - t_first)
+                                    _emit({
+                                        "delta": d,
+                                        "llm_stats": {
+                                            "source": "live",
+                                            "completion_tokens": tok,
+                                            "decode_tps": round(tok / elapsed, 2),
+                                            "prompt_ms": round((t_first - t_start) * 1000, 1),
+                                            "eval_ms": round(elapsed * 1000, 1),
+                                            "total_ms": round((now - t_start) * 1000, 1),
+                                        },
+                                    })
                                 else:
                                     _emit({"delta": d})
                             elif "usage" in ev and isinstance(ev["usage"], dict):

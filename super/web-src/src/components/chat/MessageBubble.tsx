@@ -30,26 +30,44 @@ function collectMedia(message: ChatMessage) {
   return mergeMedia(message.media, fromBlocks, fromTools);
 }
 
-/** Build interleaved timeline from blocks, or fall back to thoughts-then-content. */
+/** Build interleaved timeline from blocks, or fall back to thoughts-then-content.
+ * Consecutive thinking segments coalesce into one card (even across ReAct steps /
+ * tool rounds) until interrupted by text/media.
+ */
 function timelineBlocks(message: ChatMessage): ChatBlock[] {
-  if (Array.isArray(message.blocks) && message.blocks.length) {
-    return message.blocks.filter((b) => {
+  const raw: ChatBlock[] = Array.isArray(message.blocks) && message.blocks.length
+    ? message.blocks.filter((b) => {
       if (!b || !b.kind) return false;
       if (b.kind === 'thinking' || b.kind === 'text') return !!(b.text || '').trim();
       if (b.kind === 'media') return !!(b.media && b.media.length);
       return false;
-    });
-  }
+    })
+    : (() => {
+      const out: ChatBlock[] = [];
+      for (const t of normalizeThoughts(message)) {
+        out.push({ kind: 'thinking', text: t });
+      }
+      if ((message.content || '').trim()) {
+        out.push({ kind: 'text', text: message.content });
+      }
+      const album = collectMedia(message);
+      if (album.length) {
+        out.push({ kind: 'media', media: album });
+      }
+      return out;
+    })();
+
   const out: ChatBlock[] = [];
-  for (const t of normalizeThoughts(message)) {
-    out.push({ kind: 'thinking', text: t });
-  }
-  if ((message.content || '').trim()) {
-    out.push({ kind: 'text', text: message.content });
-  }
-  const album = collectMedia(message);
-  if (album.length) {
-    out.push({ kind: 'media', media: album });
+  for (const b of raw) {
+    const prev = out[out.length - 1];
+    if (b.kind === 'thinking' && prev?.kind === 'thinking') {
+      const left = (prev.text || '').trimEnd();
+      const right = (b.text || '').trim();
+      prev.text = left && right ? `${left}\n\n${right}` : (left || right);
+      if (typeof b.step === 'number') prev.step = b.step;
+      continue;
+    }
+    out.push(b.kind === 'thinking' || b.kind === 'text' ? { ...b, text: b.text } : { ...b });
   }
   return out;
 }

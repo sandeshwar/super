@@ -7,6 +7,7 @@ append tool results → repeat until text reply or max_steps.
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable, Iterator
 
 from .base import ToolResult
@@ -412,15 +413,48 @@ def run_agent_stream(
         stream_ok = False
 
         try:
+            t0 = time.monotonic()
+            t_first: float | None = None
+            chars = 0
             for ev in llm.chat_stream(cfg, messages, tools=tools or None):
                 if "thinking_delta" in ev and ev["thinking_delta"]:
                     streamed_any = True
                     step_thinking += ev["thinking_delta"]
-                    yield {"thinking_delta": ev["thinking_delta"], "step": step}
+                    now = time.monotonic()
+                    live = {
+                        "source": "live",
+                        "step": step,
+                        "prompt_ms": round((now - t0) * 1000, 1),
+                    }
+                    yield {"thinking_delta": ev["thinking_delta"], "step": step, "llm_stats": live}
                 if "delta" in ev and ev["delta"]:
                     streamed_any = True
-                    content += ev["delta"]
-                    yield {"delta": ev["delta"], "step": step}
+                    d = ev["delta"]
+                    content += d
+                    chars += len(d)
+                    now = time.monotonic()
+                    tok = max(1, chars // 4)
+                    if t_first is None:
+                        t_first = now
+                        live = {
+                            "source": "live",
+                            "step": step,
+                            "completion_tokens": tok,
+                            "prompt_ms": round((t_first - t0) * 1000, 1),
+                            "total_ms": round((now - t0) * 1000, 1),
+                        }
+                    else:
+                        elapsed = max(1e-3, now - t_first)
+                        live = {
+                            "source": "live",
+                            "step": step,
+                            "completion_tokens": tok,
+                            "decode_tps": round(tok / elapsed, 2),
+                            "prompt_ms": round((t_first - t0) * 1000, 1),
+                            "eval_ms": round(elapsed * 1000, 1),
+                            "total_ms": round((now - t0) * 1000, 1),
+                        }
+                    yield {"delta": d, "step": step, "llm_stats": live}
                 if "tool_calls" in ev and isinstance(ev["tool_calls"], list):
                     raw_tool_calls = ev["tool_calls"]
                     tool_calls = _parse_tool_calls({"tool_calls": ev["tool_calls"]})

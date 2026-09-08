@@ -128,7 +128,14 @@ function ToolCallItem({
   );
 }
 
-export function ToolRail({ messages }: { messages: ChatMessage[]; busy?: boolean }) {
+export function ToolRail({
+  messages,
+  open = true,
+}: {
+  messages: ChatMessage[];
+  busy?: boolean;
+  open?: boolean;
+}) {
   const chronological = useMemo(() => collectToolCalls(messages), [messages]);
   const entries = useMemo(() => [...chronological].reverse(), [chronological]);
   const newestKey = entries[0]?.key ?? null;
@@ -188,12 +195,14 @@ export function ToolRail({ messages }: { messages: ChatMessage[]; busy?: boolean
     for (const t of enterTimers.current.values()) window.clearTimeout(t);
   }, []);
 
+  if (!open) return null;
+
   if (!entries.length) {
     return (
       <aside className="tool-rail" aria-label="Tool calls">
         <div className="tool-rail-head">
           <span>Tools</span>
-          <span className="mono head-meta">{entries.length}</span>
+          <span className="mono head-meta tool-rail-count">0</span>
         </div>
         <div className="tool-rail-empty muted small">
           Tool calls show up here as the agent works.

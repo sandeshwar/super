@@ -7,6 +7,7 @@ import { EmptyState } from './EmptyState';
 type Props = {
   messages: ChatMessage[];
   busy: boolean;
+  loading?: boolean;
   error: string | null;
   editingIdx: number | null;
   editDraft: string;
@@ -26,14 +27,19 @@ type Props = {
 };
 
 export function MessageList({
-  messages, busy, error, editingIdx, editDraft, setEditDraft, setEditingIdx,
+  messages, busy, loading, error, editingIdx, editDraft, setEditDraft, setEditingIdx,
   onEditAndResend, onCopy, onEdit, onBranch, onRegenerate, onStop,
   onSetInput, onSendSuggestion, onClearError, onApprovalsChange, bottomRef,
 }: Props) {
   return (
     <div className="message-list" aria-live="polite" aria-relevant="additions text">
       <div className="message-list-inner">
-        {messages.length === 0 && !busy && (
+        {messages.length === 0 && loading && (
+          <div className="muted small" style={{ padding: 'var(--space-6) var(--space-2)' }} role="status">
+            Loading chat…
+          </div>
+        )}
+        {messages.length === 0 && !busy && !loading && (
           <EmptyState onPick={(s) => { if (onSendSuggestion) onSendSuggestion(s); else onSetInput(s); }} />
         )}
         {busy && (

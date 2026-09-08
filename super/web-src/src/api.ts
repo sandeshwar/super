@@ -384,6 +384,9 @@ class ApiService implements IApiService {
 export const api: IApiService = new ApiService();
 
 // ── Streaming (SRP, robust) ──
+/** Abort only after this long with zero bytes — resets on every chunk (long tool loops OK). */
+const STREAM_IDLE_MS = 180_000;
+
 async function streamChatImpl(
   sessionId: string | null,
   message: string,
@@ -400,7 +403,18 @@ async function streamChatImpl(
     if (external.aborted) controller.abort();
     else external.addEventListener('abort', onExternalAbort, { once: true });
   }
-  const timeout = window.setTimeout(() => controller.abort(), 300_000);
+
+  let idleTimer = 0;
+  let idleTripped = false;
+  const clearIdle = () => { window.clearTimeout(idleTimer); };
+  const bumpIdle = () => {
+    clearIdle();
+    idleTimer = window.setTimeout(() => {
+      idleTripped = true;
+      controller.abort();
+    }, STREAM_IDLE_MS);
+  };
+  bumpIdle();
 
   let res: Response;
   try {
@@ -415,17 +429,23 @@ async function streamChatImpl(
       signal: controller.signal,
     });
   } catch (e) {
-    window.clearTimeout(timeout);
+    clearIdle();
     if (external) external.removeEventListener('abort', onExternalAbort);
     if ((e as Error).name === 'AbortError') {
       if (external?.aborted) throw new AbortError('Stream stopped', e);
+      if (idleTripped) {
+        throw new StreamError(
+          'Chat stalled — no data for 3 minutes. Refresh to sync; the server may still be working.',
+          e,
+        );
+      }
       throw new NetworkError('Stream timed out', e);
     }
     throw new NetworkError((e as Error).message, e);
   }
 
   if (!res.ok || !res.body) {
-    window.clearTimeout(timeout);
+    clearIdle();
     if (external) external.removeEventListener('abort', onExternalAbort);
     const msg = await res.text().catch(() => `${res.status} ${res.statusText}`);
     let parsed = msg;
@@ -441,7 +461,10 @@ async function streamChatImpl(
   try {
     outer: for (;;) {
       const { value, done: eof } = await reader.read();
-      if (value) buf += dec.decode(value, { stream: !eof });
+      if (value) {
+        bumpIdle();
+        buf += dec.decode(value, { stream: !eof });
+      }
       let idx: number;
       while ((idx = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, idx);
@@ -481,12 +504,18 @@ async function streamChatImpl(
   } catch (e) {
     if ((e as Error).name === 'AbortError') {
       if (external?.aborted) throw new AbortError('Stream stopped', e);
+      if (idleTripped) {
+        throw new StreamError(
+          'Chat stalled — no data for 3 minutes. Refresh to sync; the server may still be working.',
+          e,
+        );
+      }
       throw new NetworkError('Stream timed out', e);
     }
     if (e instanceof StreamError || e instanceof ApiError || e instanceof AbortError) throw e;
     throw new StreamError((e as Error).message || 'Stream failed', e);
   } finally {
-    window.clearTimeout(timeout);
+    clearIdle();
     if (external) external.removeEventListener('abort', onExternalAbort);
     try { await reader.cancel(); } catch { /* ignore */ }
     try { reader.releaseLock(); } catch { /* ignore */ }

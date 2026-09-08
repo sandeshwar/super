@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import type { ChildSpan, SessionSummary } from '../../types';
 
 type Props = {
@@ -13,7 +12,7 @@ type Props = {
   onSelectSpan?: (span: ChildSpan) => void;
   onToggleSelect?: () => void;
   onDelete: () => void;
-  onRename: (title: string | null) => void;
+  onRename?: (title: string | null) => void;
 };
 
 function spanLabel(sp: ChildSpan): string {
@@ -61,17 +60,14 @@ function SpanSublist({
 
 export function SessionRow({
   s, active, childActive, activeSpanId, selected, selectMode,
-  onSelect, onSelectSpan, onToggleSelect, onDelete, onRename,
+  onSelect, onSelectSpan, onToggleSelect, onDelete,
 }: Props) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(s.title);
-  useEffect(() => { setDraft(s.title); }, [s.title]);
   const spans = s.spans || [];
   const nLive = spans.filter((x) => x.status === 'running').length;
   const nDone = spans.filter((x) => x.status !== 'running').length;
 
   return (
-    <div className={`session-row${active ? ' active' : ''}${childActive ? ' has-active-span' : ''}${editing ? ' editing' : ''}${selected ? ' selected' : ''}${selectMode ? ' select-mode' : ''}${spans.length ? ' has-spans' : ''}`}>
+    <div className={`session-row${active ? ' active' : ''}${childActive ? ' has-active-span' : ''}${selected ? ' selected' : ''}${selectMode ? ' select-mode' : ''}${spans.length ? ' has-spans' : ''}`}>
       <div className="session-row-main">
         {selectMode && (
           <label className="session-row-check" onClick={(e) => e.stopPropagation()}>
@@ -90,22 +86,7 @@ export function SessionRow({
           aria-label={`${selectMode ? 'Toggle' : 'Select'} ${s.title || s.id}`}
         >
           <span className="session-row-title">
-            {editing ? (
-              <input
-                className="session-row-rename"
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') { onRename(draft); setEditing(false); }
-                  if (e.key === 'Escape') setEditing(false);
-                }}
-                onBlur={() => setEditing(false)}
-                autoFocus
-                onClick={(e) => e.stopPropagation()}
-              />
-            ) : (
-              <span className="session-row-name" title={s.title}>{s.title || 'Untitled'}</span>
-            )}
+            <span className="session-row-name" title={s.title}>{s.title || 'Untitled'}</span>
             {nLive > 0 && <span className="session-span-badge live" title="Active sub-agent">live</span>}
           </span>
           <span className="session-row-meta mono">
@@ -119,22 +100,6 @@ export function SessionRow({
 
         {!selectMode && (
           <div className="session-row-actions" role="group" aria-label="Chat actions">
-            <button
-              className="session-row-btn"
-              onClick={(e) => { e.stopPropagation(); setEditing((v) => !v); }}
-              aria-label={`Rename ${s.title || s.id}`}
-              title="Rename chat"
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M11.5 2.5l2 2-7 7H4.5v-2l7-7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
-            </button>
-            <button
-              className="session-row-btn"
-              onClick={(e) => { e.stopPropagation(); onRename(null); }}
-              aria-label="Auto-rename via summary"
-              title="Auto-rename via chat summary"
-            >
-              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden><path d="M8 2l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
-            </button>
             <button
               className="session-row-btn session-row-delete"
               onClick={(e) => { e.stopPropagation(); if (confirm(`Delete chat "${s.title || s.id.slice(0, 6)}"? This cannot be undone.`)) onDelete(); }}

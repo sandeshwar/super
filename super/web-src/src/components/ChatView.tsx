@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card } from './ui/Card';
 import { Button } from './ui/Button';
 import { useChat } from './chat/hooks/useChat';
@@ -8,7 +8,8 @@ import { ChatHeader } from './chat/ChatHeader';
 import { ContextBar } from './chat/ContextBar';
 import { MessageList } from './chat/MessageList';
 import { ChatDock } from './chat/ChatDock';
-import { ToolRail } from './chat/ToolRail';
+import { ToolRail, collectToolCalls } from './chat/ToolRail';
+import { ChatSideToggles } from './chat/ChatSideToggles';
 import { CanvasPanel, useCanvasController } from './chat/CanvasPanel';
 
 /**
@@ -32,7 +33,7 @@ export default function ChatView({
     isRenaming, leaf, leafRendered, mentionPaths, showSlash, slashFilter, showMention, mentionFilter, mentionIndex, setMentionIndex,
     editingIdx, setEditingIdx, editDraft, setEditDraft, cost, tokenStats, activeMeta, inputRef, bottomRef,
     selectMode, selectedIds, toggleSelectMode, toggleSelected, selectAllFiltered, clearSelection, deleteSelected,
-    llmStats,
+    llmStats, sessionLoading,
     agentView, parentId, activeSpanId, selectSession, selectSpan, backToParent,
     send, stop, regenerate, editAndResend, branchFrom, shareExport, newChat, deleteChat, renameChat,
     handleInputChange, handleFile, setShowSlash, setShowMention, patchApprovals,
@@ -41,6 +42,45 @@ export default function ChatView({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const canvas = useCanvasController(messages, activeId);
   const showCanvasCol = canvas.hasArtifacts || canvas.detached;
+
+  const toolCount = useMemo(() => collectToolCalls(messages).length, [messages]);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsOverride = useRef<'open' | 'closed' | null>(null);
+  const toolsSessionRef = useRef(activeId);
+  const [contextOpen, setContextOpen] = useState(() => {
+    try { return localStorage.getItem('super-context-open') === '1'; } catch { return false; }
+  });
+
+  // New chat / session switch → reset; auto state follows tool count.
+  useEffect(() => {
+    if (toolsSessionRef.current === activeId) return;
+    toolsSessionRef.current = activeId;
+    toolsOverride.current = null;
+  }, [activeId]);
+
+  useEffect(() => {
+    if (toolsOverride.current === 'open') { setToolsOpen(true); return; }
+    if (toolsOverride.current === 'closed') { setToolsOpen(false); return; }
+    setToolsOpen(toolCount > 0);
+  }, [toolCount, activeId]);
+
+  const toggleTools = () => {
+    setToolsOpen((v) => {
+      const next = !v;
+      toolsOverride.current = next ? 'open' : 'closed';
+      return next;
+    });
+  };
+
+  const toggleContext = () => {
+    setContextOpen((v) => {
+      const next = !v;
+      try { localStorage.setItem('super-context-open', next ? '1' : '0'); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
+  const showToolsToggle = toolsOpen || toolCount > 0;
 
   return (
     <div
@@ -82,7 +122,7 @@ export default function ChatView({
         onDeleteSelected={() => void deleteSelected()}
       />
 
-      <Card className="chat-panel">
+      <Card className={`chat-panel${toolsOpen ? ' tools-open' : ''}`}>
         <LeafBanner leaf={leaf} leafRendered={leafRendered} />
         <ChatHeader
           activeId={activeId}
@@ -94,11 +134,20 @@ export default function ChatView({
           agentView={agentView}
           onBackToParent={backToParent}
         />
-        <ContextBar tokenStats={tokenStats} leaf={leaf} messagesLen={messages.length} cost={cost} llmStats={llmStats} busy={busy} />
-        <div className="chat-main">
+        <ContextBar
+          open={contextOpen}
+          tokenStats={tokenStats}
+          leaf={leaf}
+          messagesLen={messages.length}
+          cost={cost}
+          llmStats={llmStats}
+          busy={busy}
+        />
+        <div className={`chat-main${toolsOpen ? ' tools-open' : ''}`}>
           <MessageList
             messages={messages}
             busy={busy}
+            loading={sessionLoading}
             error={error}
             editingIdx={editingIdx}
             editDraft={editDraft}
@@ -116,7 +165,15 @@ export default function ChatView({
             onApprovalsChange={patchApprovals}
             bottomRef={bottomRef}
           />
-          <ToolRail messages={messages} busy={busy} />
+          <ToolRail messages={messages} busy={busy} open={toolsOpen} />
+          <ChatSideToggles
+            showTools={showToolsToggle}
+            toolsOpen={toolsOpen}
+            toolsBusy={busy && toolCount > 0}
+            onToggleTools={toggleTools}
+            contextOpen={contextOpen}
+            onToggleContext={toggleContext}
+          />
         </div>
         <ChatDock
           input={input}

@@ -22,4 +22,8 @@ export const Icons = {
   check: (p: IconProps) => wrap(<><path d="M5.5 8l1.8 1.8L10.8 6.3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"/></>, p),
   info: (p: IconProps) => wrap(<><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.2"/><path d="M8 7v3M8 5.5h.01" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></>, p),
   menu: (p: IconProps) => wrap(<><path d="M3 5h10M3 8h10M3 11h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></>, p),
+  tools: (p: IconProps) => wrap(<><path d="M10.2 2.8a2.2 2.2 0 013 3L9.5 9.5l-1.2.2.2-1.2 3.7-3.7z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/><path d="M2.5 13.5l3.8-3.8M8.2 7.8L5.5 5.1a2 2 0 00-2.8 0L2 5.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></>, p),
+  terminal: (p: IconProps) => wrap(<><rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M5 6.2l2.2 1.8L5 9.8M8.2 9.8H11" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></>, p),
+  panelRight: (p: IconProps) => wrap(<><rect x="2" y="2.5" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M10 2.5v11" stroke="currentColor" strokeWidth="1.2"/></>, p),
+  activity: (p: IconProps) => wrap(<><path d="M1.5 8h2.2l1.6-4.2L8 12.5l1.8-4.5H14.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></>, p),
 };
